@@ -1,0 +1,36 @@
+{
+  "manifest_version": 2,
+  "name": "ContainSite",
+  "version": "0.1.0",
+  "description": "Per-container fingerprint isolation — each container gets its own device identity",
+  "permissions": [
+    "contextualIdentities",
+    "cookies",
+    "storage",
+    "tabs",
+    "webRequest",
+    "webRequestBlocking",
+    "<all_urls>"
+  ],
+  "background": {
+    "scripts": ["lib/prng.js", "lib/fingerprint-gen.js", "background.js"]
+  },
+  "browser_action": {
+    "default_popup": "popup/popup.html",
+    "default_icon": {
+      "48": "icons/icon-48.png",
+      "96": "icons/icon-96.png"
+    },
+    "default_title": "ContainSite"
+  },
+  "icons": {
+    "48": "icons/icon-48.png",
+    "96": "icons/icon-96.png"
+  },
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "containsite@salmutt.dev",
+      "strict_min_version": "100.0"
+    }
+  }
+}
