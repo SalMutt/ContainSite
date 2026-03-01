@@ -444,11 +444,20 @@ function formatAcceptLanguage(languages) {
   }).join(",");
 }
 
+// Auth domains where UA spoofing breaks login flows
+const AUTH_BYPASS_DOMAINS = ["accounts.google.com", "accounts.youtube.com"];
+
 browser.webRequest.onBeforeSendHeaders.addListener(
   function(details) {
     // cookieStoreId is available in Firefox 77+ webRequest details
     const profile = containerProfiles[details.cookieStoreId];
     if (!profile) return {};
+
+    // Skip UA spoofing on auth domains so login isn't rejected
+    try {
+      const host = new URL(details.url).hostname;
+      if (AUTH_BYPASS_DOMAINS.includes(host)) return {};
+    } catch(e) {}
 
     const headers = details.requestHeaders;
     // Map platform to Client Hints platform name

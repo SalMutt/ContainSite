@@ -170,6 +170,16 @@
   // =========================================================================
 
   if (vectorEnabled("navigator")) {
+    // Auth domains where UA spoofing breaks login — return real values there
+    const AUTH_BYPASS_DOMAINS = ["accounts.google.com", "accounts.youtube.com"];
+    const UA_PROPS = new Set(["userAgent", "appVersion", "oscpu"]);
+
+    // Capture real values before any overrides
+    const realNav = {};
+    for (const p of UA_PROPS) {
+      try { realNav[p] = window.navigator[p]; } catch(e) {}
+    }
+
     const navOverrides = {
       hardwareConcurrency: CONFIG.nav.hardwareConcurrency,
       platform: CONFIG.nav.platform,
@@ -182,11 +192,27 @@
 
     for (const [prop, value] of Object.entries(navOverrides)) {
       if (value !== undefined) {
-        Object.defineProperty(pageWindow.Navigator.prototype, prop, {
-          get: exportFunction(function() { return value; }, pageWindow),
-          configurable: true,
-          enumerable: true
-        });
+        if (UA_PROPS.has(prop)) {
+          // UA-related props: return real value on auth domains
+          const realValue = realNav[prop];
+          Object.defineProperty(pageWindow.Navigator.prototype, prop, {
+            get: exportFunction(function() {
+              try {
+                const h = pageWindow.location.hostname;
+                if (AUTH_BYPASS_DOMAINS.indexOf(h) !== -1) return realValue;
+              } catch(e) {}
+              return value;
+            }, pageWindow),
+            configurable: true,
+            enumerable: true
+          });
+        } else {
+          Object.defineProperty(pageWindow.Navigator.prototype, prop, {
+            get: exportFunction(function() { return value; }, pageWindow),
+            configurable: true,
+            enumerable: true
+          });
+        }
       }
     }
 
