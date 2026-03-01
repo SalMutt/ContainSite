@@ -92,6 +92,20 @@
     const UNMASKED_VENDOR = 0x9245;
     const UNMASKED_RENDERER = 0x9246;
 
+    // Normalize key max parameters to common values to prevent GPU fingerprinting
+    const PARAM_OVERRIDES = {
+      0x0D33: 16384,  // MAX_TEXTURE_SIZE
+      0x851C: 16384,  // MAX_CUBE_MAP_TEXTURE_SIZE
+      0x84E8: 16384,  // MAX_RENDERBUFFER_SIZE
+      0x8869: 16,     // MAX_VERTEX_ATTRIBS
+      0x8872: 16,     // MAX_VERTEX_TEXTURE_IMAGE_UNITS
+      0x8B4C: 16,     // MAX_TEXTURE_IMAGE_UNITS
+      0x8DFB: 32,     // MAX_VARYING_VECTORS
+      0x8DFC: 256,    // MAX_VERTEX_UNIFORM_VECTORS
+      0x8DFD: 512,    // MAX_FRAGMENT_UNIFORM_VECTORS
+      0x80A9: 16,     // MAX_SAMPLES
+    };
+
     function patchWebGL(protoName) {
       const pageProto = pageWindow[protoName];
       if (!pageProto) return;
@@ -102,6 +116,11 @@
       exportFunction(function(pname) {
         if (pname === UNMASKED_VENDOR) return CONFIG.webgl.vendor;
         if (pname === UNMASKED_RENDERER) return CONFIG.webgl.renderer;
+        if (PARAM_OVERRIDES[pname] !== undefined) {
+          // Return the normalized value, but never exceed the real GPU's capability
+          const real = origGetParam.call(this, pname);
+          return (typeof real === "number") ? Math.min(real, PARAM_OVERRIDES[pname]) : real;
+        }
         return origGetParam.call(this, pname);
       }, pageProto.prototype, { defineAs: "getParameter" });
     }
@@ -443,6 +462,44 @@
 
       return metrics;
     }, pageWindow.CanvasRenderingContext2D.prototype, { defineAs: "measureText" });
+
+    // --- DOM Element Dimension Noise ---
+    // Font enumeration measures offsetWidth/Height of test spans to detect installed fonts.
+    // Adding seeded noise prevents consistent dimension-based font fingerprinting.
+    const fontDimProps = ["offsetWidth", "offsetHeight", "scrollWidth", "scrollHeight", "clientWidth", "clientHeight"];
+    for (const prop of fontDimProps) {
+      const origDesc = Object.getOwnPropertyDescriptor(window.HTMLElement.prototype, prop);
+      if (origDesc && origDesc.get) {
+        const origGet = origDesc.get;
+        Object.defineProperty(pageWindow.HTMLElement.prototype, prop, {
+          get: exportFunction(function() {
+            const val = origGet.call(this);
+            return val + (fontRng() - 0.5) * 0.3;
+          }, pageWindow),
+          configurable: true,
+          enumerable: true
+        });
+      }
+    }
+
+    // --- document.fonts (FontFaceSet) API Protection ---
+    // document.fonts.check() directly reveals installed fonts; size/iterators expose count.
+    if (pageWindow.document.fonts) {
+      try {
+        Object.defineProperty(pageWindow.document.fonts, "check", {
+          value: exportFunction(function() { return false; }, pageWindow),
+          configurable: true, enumerable: true
+        });
+        Object.defineProperty(pageWindow.document.fonts, "size", {
+          get: exportFunction(function() { return 0; }, pageWindow),
+          configurable: true, enumerable: true
+        });
+        Object.defineProperty(pageWindow.document.fonts, "forEach", {
+          value: exportFunction(function() {}, pageWindow),
+          configurable: true, enumerable: true
+        });
+      } catch(e) {}
+    }
   }
 
   // =========================================================================
@@ -580,17 +637,15 @@
   // =========================================================================
   //  WEBGL EXTENDED FINGERPRINT PROTECTION
   // =========================================================================
-  //  Beyond vendor/renderer, WebGL exposes max parameters and extensions
-  //  that vary per GPU and can be used for fingerprinting.
+  //  Normalize getSupportedExtensions to a common baseline set
 
   if (vectorEnabled("webgl")) {
-    function patchWebGLExtended(protoName) {
+    function patchWebGLExtensions(protoName) {
       const pageProto = pageWindow[protoName];
       if (!pageProto) return;
       const origProto = window[protoName];
       if (!origProto) return;
 
-      // Spoof getSupportedExtensions to return a consistent set
       const origGetExtensions = origProto.prototype.getSupportedExtensions;
       const BASELINE_EXTENSIONS = [
         "ANGLE_instanced_arrays", "EXT_blend_minmax", "EXT_color_buffer_half_float",
@@ -606,34 +661,13 @@
       exportFunction(function() {
         const real = origGetExtensions.call(this);
         if (!real) return real;
-        // Return intersection of real and baseline — only report extensions
-        // that are in both sets to normalize across GPUs
         const filtered = BASELINE_EXTENSIONS.filter(e => real.includes(e));
         return cloneInto(filtered, pageWindow);
       }, pageProto.prototype, { defineAs: "getSupportedExtensions" });
-
-      // Normalize key max parameters to common values
-      const origGetParam = origProto.prototype.getParameter;
-      const PARAM_OVERRIDES = {
-        0x0D33: 16384,  // MAX_TEXTURE_SIZE
-        0x851C: 16384,  // MAX_CUBE_MAP_TEXTURE_SIZE
-        0x84E8: 16384,  // MAX_RENDERBUFFER_SIZE
-        0x8869: 16,     // MAX_VERTEX_ATTRIBS
-        0x8872: 16,     // MAX_VERTEX_TEXTURE_IMAGE_UNITS
-        0x8B4C: 16,     // MAX_TEXTURE_IMAGE_UNITS
-        0x8DFB: 32,     // MAX_VARYING_VECTORS
-        0x8DFC: 256,    // MAX_VERTEX_UNIFORM_VECTORS
-        0x8DFD: 512,    // MAX_FRAGMENT_UNIFORM_VECTORS
-        0x80A9: 16,     // MAX_SAMPLES (for multisampling)
-      };
-      // Don't re-override getParameter if webgl vendor/renderer already did it
-      // Instead, extend the existing override with additional parameter checks
-      // (The webgl section above already overrides getParameter, but only for
-      // UNMASKED_VENDOR/RENDERER. We need to patch at the origProto level too.)
     }
 
-    patchWebGLExtended("WebGLRenderingContext");
-    patchWebGLExtended("WebGL2RenderingContext");
+    patchWebGLExtensions("WebGLRenderingContext");
+    patchWebGLExtensions("WebGL2RenderingContext");
   }
 
   // =========================================================================

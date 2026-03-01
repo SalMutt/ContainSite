@@ -10,6 +10,7 @@ Every website you visit is automatically placed in its own isolated container wi
 - **Unique fingerprints per container** — every container presents a completely different device to websites
 - **Auth-aware** — login redirects (e.g. YouTube to Google) stay in the originating container so authentication works seamlessly
 - **Cross-site navigation** — clicking a link to a different domain automatically switches to the correct container
+- **HTTP header spoofing** — User-Agent, Accept-Language, and Client Hints headers match each container's identity
 - **Configurable** — toggle individual fingerprint vectors, whitelist domains, manage containers from the options page
 - **Zero configuration** — install and browse, everything is automatic
 
@@ -18,17 +19,23 @@ Every website you visit is automatically placed in its own isolated container wi
 | Vector | Method |
 |---|---|
 | Canvas | Deterministic pixel noise per container seed |
-| WebGL | Spoofed GPU vendor and renderer strings |
+| WebGL | Spoofed GPU vendor, renderer, max parameters, and normalized extensions |
 | AudioContext | Seeded noise on frequency and channel data |
-| Navigator | CPU cores, platform, languages, device memory |
+| Navigator | CPU cores, platform, languages, device memory, oscpu |
 | Screen | Resolution, color depth, window dimensions |
 | Timezone | getTimezoneOffset, Date.toString, Intl.DateTimeFormat |
 | WebRTC | Forced relay-only ICE policy (blocks local IP leak) |
-| Fonts | Noise on measureText (prevents font enumeration) |
+| Fonts | Noise on measureText + DOM element dimensions (offsetWidth/Height etc.) |
+| Font API | document.fonts.check() blocked, size reports 0 |
 | ClientRects | Sub-pixel noise on getBoundingClientRect |
 | Plugins | Reports empty |
 | Battery | Always reports full/charging |
 | Connection | Fixed network profile |
+| HTTP Headers | User-Agent, Accept-Language spoofed per container; Client Hints stripped |
+| Speech Synthesis | getVoices() returns empty, voiceschanged suppressed |
+| matchMedia | Screen dimension queries return spoofed values |
+| Performance | performance.now() precision reduced to 0.1ms |
+| Storage | navigator.storage.estimate() returns generic values |
 
 ## How it works
 
@@ -47,15 +54,19 @@ Background Script
   ├── Auto-creates containers per domain (contextualIdentities API)
   ├── Generates deterministic fingerprint from seed (Mulberry32 PRNG)
   ├── Registers per-container content scripts (contentScripts.register + cookieStoreId)
-  └── Intercepts navigation to assign tabs to containers
+  ├── Intercepts navigation to assign tabs to containers
+  └── Spoofs HTTP headers (User-Agent, Accept-Language, Client Hints) per container
 
 Content Script (per container, ISOLATED world, document_start)
   └── Uses exportFunction() + wrappedJSObject to override page APIs
       ├── Canvas, WebGL, AudioContext prototypes
-      ├── Navigator, Screen properties
+      ├── Navigator, Screen, Performance properties
       ├── Timezone (Date, Intl.DateTimeFormat)
       ├── WebRTC (RTCPeerConnection)
-      └── Font metrics, ClientRects, Battery, Connection
+      ├── Font metrics (measureText, DOM dimensions, document.fonts)
+      ├── ClientRects, Battery, Connection, Storage
+      ├── Speech synthesis, matchMedia
+      └── Plugins, mimeTypes
 ```
 
 Uses Firefox's `exportFunction()` API to inject overrides from the isolated content script world directly into the page context. This bypasses Content Security Policy restrictions that block inline script injection.
@@ -92,7 +103,7 @@ Right-click the toolbar icon → **Manage Extension** → **Preferences** to ope
 
 ### Fingerprint Vectors
 
-Toggle individual spoofing vectors on or off globally. All 12 vectors can be independently controlled:
+Toggle individual spoofing vectors on or off globally. Vectors can be independently controlled:
 
 Canvas, WebGL, Audio, Navigator, Screen, Timezone, WebRTC, Fonts, Client Rects, Plugins, Battery, Connection
 
@@ -113,12 +124,34 @@ Full table of all managed containers with per-container controls:
 - Firefox 100+ or LibreWolf
 - Containers must be enabled (`privacy.userContext.enabled = true` in `about:config`)
 
+### Recommended about:config settings
+
+For maximum WebRTC leak protection, set these in `about:config`:
+
+| Setting | Value | Purpose |
+|---|---|---|
+| `media.peerconnection.ice.default_address_only` | `true` | Only use default route for ICE |
+| `media.peerconnection.ice.no_host` | `true` | Prevent host candidate gathering |
+| `media.peerconnection.ice.proxy_only_if_behind_proxy` | `true` | Force proxy-only mode |
+
+LibreWolf may already have some of these set by default.
+
+## Testing
+
+A built-in test page is included at `test/fingerprint-test.html`. To use it:
+
+1. Load the extension via `about:debugging`
+2. Add a hostname alias (e.g. `127.0.0.1 containsite-test.site` in `/etc/hosts`) — localhost is excluded from containerization
+3. Start a local server: `python3 -m http.server 8888 --bind 0.0.0.0`
+4. Open `http://containsite-test.site:8888/test/fingerprint-test.html` in a regular (non-private) window
+5. Open the same URL in a different container tab and compare composite hashes
+
 ## File structure
 
 ```
 manifest.json          MV2 extension manifest
-background.js          Container management, navigation interception, script registration
-inject.js              Fingerprint overrides (exportFunction-based)
+background.js          Container management, navigation, HTTP header spoofing
+inject.js              Fingerprint overrides (exportFunction-based, 18 vectors)
 lib/
   prng.js              Mulberry32 seeded PRNG
   fingerprint-gen.js   Deterministic seed → device profile generator
@@ -130,6 +163,8 @@ options/
   options.html         Full options page (opens in tab)
   options.css          Styles
   options.js           Vector toggles, whitelist, container management
+test/
+  fingerprint-test.html  Comprehensive fingerprint verification page
 icons/
   icon-48.png          Toolbar icon
   icon-96.png          Extension icon

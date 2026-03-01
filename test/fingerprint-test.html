@@ -182,10 +182,29 @@
   <div class="section-body" id="storage-results"></div>
 </div>
 
+<!-- Font Enumeration (DOM) -->
+<div class="section" id="sec-fontdom">
+  <div class="section-header"><span class="status-dot pending" id="dot-fontdom"></span><h2>Font Enumeration (DOM Dimensions)</h2></div>
+  <div class="section-body" id="fontdom-results"></div>
+</div>
+
+<!-- document.fonts -->
+<div class="section" id="sec-docfonts">
+  <div class="section-header"><span class="status-dot pending" id="dot-docfonts"></span><h2>document.fonts API</h2></div>
+  <div class="section-body" id="docfonts-results"></div>
+</div>
+
+<!-- Client Hints -->
+<div class="section" id="sec-clienthints">
+  <div class="section-header"><span class="status-dot pending" id="dot-clienthints"></span><h2>Client Hints Headers</h2></div>
+  <div class="section-body" id="clienthints-results"></div>
+</div>
+
 <button class="copy-btn" onclick="copyReport()">Copy Full Report to Clipboard</button>
 
 <canvas id="test-canvas" width="300" height="60"></canvas>
 <span id="rect-probe" style="position:absolute;visibility:hidden;font-size:16px;">ABCDEFghijklmnop</span>
+<span id="fontdom-probe" style="position:absolute;visibility:hidden;font-size:72px;font-family:monospace;">mmmmmmmmmmmmmmm</span>
 
 <script>
 // Utility: simple hash for display (works on HTTP — no crypto.subtle needed)
@@ -837,6 +856,131 @@ async function testStorage() {
   }
 }
 
+// ── Font Enumeration (DOM) ──
+function testFontDOM() {
+  const el = document.getElementById("fontdom-results");
+  const probe = document.getElementById("fontdom-probe");
+
+  // Measure element dimensions — should have noise if spoofed
+  const w = probe.offsetWidth;
+  const h = probe.offsetHeight;
+  const sw = probe.scrollWidth;
+  const sh = probe.scrollHeight;
+  const cw = probe.clientWidth;
+  const ch = probe.clientHeight;
+
+  const vals = {
+    "offsetWidth": w, "offsetHeight": h,
+    "scrollWidth": sw, "scrollHeight": sh,
+    "clientWidth": cw, "clientHeight": ch
+  };
+  report.fontdom = vals;
+
+  let html = "";
+  for (const [k, v] of Object.entries(vals)) {
+    const hasFrac = v % 1 !== 0;
+    html += row(k, v.toFixed(6), hasFrac ? "spoofed" : "");
+  }
+  el.innerHTML = html;
+
+  // If noise is applied, at least some values will have fractional parts
+  const anyFrac = Object.values(vals).some(v => v % 1 !== 0);
+  sectionStatus.fontdom = anyFrac ? "pass" : "warn";
+  setDot("dot-fontdom", sectionStatus.fontdom);
+}
+
+// ── document.fonts API ──
+function testDocFonts() {
+  const el = document.getElementById("docfonts-results");
+  if (!document.fonts) {
+    report.docfonts = { status: "API not available" };
+    el.innerHTML = row("Status", "document.fonts not available", "");
+    sectionStatus.docfonts = "warn";
+    setDot("dot-docfonts", "warn");
+    return;
+  }
+
+  const size = document.fonts.size;
+  const checkArial = document.fonts.check("16px Arial");
+  const checkMono = document.fonts.check("16px monospace");
+
+  const vals = {
+    "document.fonts.size": size,
+    "check('16px Arial')": checkArial,
+    "check('16px monospace')": checkMono,
+  };
+  report.docfonts = vals;
+
+  let html = "";
+  html += row("document.fonts.size", size, size === 0 ? "spoofed" : "real");
+  html += row("check('16px Arial')", checkArial, !checkArial ? "spoofed" : "real");
+  html += row("check('16px monospace')", checkMono, !checkMono ? "spoofed" : "real");
+  el.innerHTML = html;
+
+  const spoofed = size === 0 && !checkArial && !checkMono;
+  sectionStatus.docfonts = spoofed ? "pass" : "warn";
+  setDot("dot-docfonts", sectionStatus.docfonts);
+}
+
+// ── Client Hints Headers ──
+async function testClientHints() {
+  const el = document.getElementById("clienthints-results");
+  try {
+    await withTimeout(async () => {
+      // Try fetching httpbin.org to see what headers are actually sent
+      let html = "";
+      try {
+        const resp = await fetch("https://httpbin.org/headers", {
+          method: "GET",
+          mode: "cors"
+        });
+        const data = await resp.json();
+        const headers = data.headers || {};
+
+        const ua = headers["User-Agent"] || "(not sent)";
+        const al = headers["Accept-Language"] || "(not sent)";
+        const chUA = headers["Sec-Ch-Ua"] || "(not sent)";
+        const chPlatform = headers["Sec-Ch-Ua-Platform"] || "(not sent)";
+        const chMobile = headers["Sec-Ch-Ua-Mobile"] || "(not sent)";
+
+        report.clienthints = {
+          "HTTP User-Agent": ua,
+          "HTTP Accept-Language": al,
+          "Sec-CH-UA": chUA,
+          "Sec-CH-UA-Platform": chPlatform,
+          "Sec-CH-UA-Mobile": chMobile
+        };
+
+        html += row("HTTP User-Agent", ua);
+        html += row("HTTP Accept-Language", al);
+        html += row("Sec-CH-UA", chUA, chUA === "(not sent)" ? "spoofed" : "");
+        html += row("Sec-CH-UA-Platform", chPlatform, chPlatform === "(not sent)" ? "spoofed" : "");
+        html += row("Sec-CH-UA-Mobile", chMobile, chMobile === "(not sent)" ? "spoofed" : "");
+
+        // Check if HTTP UA matches JS UA
+        const jsUA = navigator.userAgent;
+        const uaMatch = ua.includes("Firefox") && jsUA.includes("Firefox");
+        html += row("JS/HTTP UA coherent", uaMatch ? "yes" : "MISMATCH", uaMatch ? "spoofed" : "real");
+
+        sectionStatus.clienthints = uaMatch ? "pass" : "fail";
+      } catch(e) {
+        report.clienthints = { note: "httpbin.org fetch failed (CORS/network)" };
+        html += row("httpbin.org fetch", "Failed: " + e.message);
+        html += row("Note", "Client Hints are stripped by the extension if present");
+        sectionStatus.clienthints = "warn";
+      }
+
+      el.innerHTML = html;
+      setDot("dot-clienthints", sectionStatus.clienthints);
+    }, 5000);
+  } catch(e) {
+    report.clienthints = { error: e.message };
+    el.innerHTML = row("Error", e.message);
+    sectionStatus.clienthints = "warn";
+    setDot("dot-clienthints", "warn");
+  }
+}
+
 // ── Summary ──
 function updateSummary() {
   let pass = 0, fail = 0, warn = 0;
@@ -914,6 +1058,8 @@ async function runAll() {
   try { testSpeech(); } catch(e) { console.error("speech test:", e); }
   try { testMatchMedia(); } catch(e) { console.error("matchmedia test:", e); }
   try { testPerf(); } catch(e) { console.error("perf test:", e); }
+  try { testFontDOM(); } catch(e) { console.error("fontdom test:", e); }
+  try { testDocFonts(); } catch(e) { console.error("docfonts test:", e); }
 
   // Async tests — run in parallel with individual error handling
   await Promise.allSettled([
@@ -923,6 +1069,7 @@ async function runAll() {
     testWebRTC(),
     testHeaders(),
     testStorage(),
+    testClientHints(),
   ]);
 
   updateSummary();

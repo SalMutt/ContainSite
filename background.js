@@ -91,7 +91,8 @@ async function buildProfileAndRegister(cookieStoreId, seed) {
   // Cache profile for HTTP header spoofing
   containerProfiles[cookieStoreId] = {
     userAgent: profile.nav.userAgent,
-    languages: profile.nav.languages
+    languages: profile.nav.languages,
+    platform: profile.nav.platform
   };
 
   await registerForContainer(cookieStoreId, profile);
@@ -450,12 +451,25 @@ browser.webRequest.onBeforeSendHeaders.addListener(
     if (!profile) return {};
 
     const headers = details.requestHeaders;
-    for (let i = 0; i < headers.length; i++) {
+    // Map platform to Client Hints platform name
+    const platformMap = {
+      "Win32": "Windows", "Linux x86_64": "Linux", "MacIntel": "macOS"
+    };
+    const chPlatform = platformMap[profile.platform] || "Unknown";
+
+    for (let i = headers.length - 1; i >= 0; i--) {
       const name = headers[i].name.toLowerCase();
       if (name === "user-agent") {
         headers[i].value = profile.userAgent;
       } else if (name === "accept-language") {
         headers[i].value = formatAcceptLanguage(profile.languages);
+      } else if (name === "sec-ch-ua" || name === "sec-ch-ua-full-version-list") {
+        // Firefox doesn't normally send these, but strip if present
+        headers.splice(i, 1);
+      } else if (name === "sec-ch-ua-platform") {
+        headers[i].value = `"${chPlatform}"`;
+      } else if (name === "sec-ch-ua-mobile") {
+        headers[i].value = "?0";
       }
     }
     return { requestHeaders: headers };
