@@ -9,6 +9,8 @@ Every website you visit is automatically placed in its own isolated container wi
 - **Automatic per-site containers** — each domain gets its own container on first visit, no configuration needed
 - **Unique fingerprints per container** — every container presents a completely different device to websites
 - **Auth-aware** — login redirects (e.g. YouTube to Google) stay in the originating container so authentication works seamlessly
+- **Cross-site navigation** — clicking a link to a different domain automatically switches to the correct container
+- **Configurable** — toggle individual fingerprint vectors, whitelist domains, manage containers from the options page
 - **Zero configuration** — install and browse, everything is automatic
 
 ## Fingerprint vectors protected
@@ -84,6 +86,28 @@ Click the ContainSite toolbar icon to see all active containers. From there you 
 - **Prune Unused** — remove containers with no open tabs
 - **Reset All** — clear all containers and data
 
+## Options Page
+
+Right-click the toolbar icon → **Manage Extension** → **Preferences** to open the full options page.
+
+### Fingerprint Vectors
+
+Toggle individual spoofing vectors on or off globally. All 12 vectors can be independently controlled:
+
+Canvas, WebGL, Audio, Navigator, Screen, Timezone, WebRTC, Fonts, Client Rects, Plugins, Battery, Connection
+
+### Domain Whitelist
+
+Add domains that should never be containerized or fingerprint-spoofed. Useful for internal sites, local services, or sites that break with container isolation.
+
+### Container Management
+
+Full table of all managed containers with per-container controls:
+
+- **Toggle** spoofing on/off
+- **Regenerate** fingerprint
+- **Delete** container (removes all cookies and data for that site)
+
 ## Requirements
 
 - Firefox 100+ or LibreWolf
@@ -102,6 +126,10 @@ popup/
   popup.html           Container list UI
   popup.css            Styles
   popup.js             Toggle, regenerate, prune, reset controls
+options/
+  options.html         Full options page (opens in tab)
+  options.css          Styles
+  options.js           Vector toggles, whitelist, container management
 icons/
   icon-48.png          Toolbar icon
   icon-96.png          Extension icon
@@ -114,7 +142,7 @@ No build tools required. The extension is plain JavaScript with no dependencies.
 To package as `.xpi`:
 
 ```sh
-zip -r ContainSite.xpi manifest.json background.js inject.js lib/ popup/ icons/icon-48.png icons/icon-96.png
+zip -r ContainSite.xpi manifest.json background.js inject.js lib/ popup/ options/ icons/icon-48.png icons/icon-96.png
 ```
 
 ## License
