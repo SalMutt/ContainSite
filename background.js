@@ -188,7 +188,16 @@ async function assignTabToContainer(tabId, url, baseDomain) {
         delete pendingTabs[tabId];
         return;
       }
-      // It's our container but wrong domain — reassign to correct container
+      // Tab is in our container navigating to a different domain.
+      // If target is an auth provider, keep in current container so auth
+      // cookies stay isolated (e.g. YouTube login via accounts.google.com
+      // stays in the youtube.com container, not the google.com container)
+      const hostname = extractDomain(url);
+      if (hostname && AUTH_BYPASS_DOMAINS.includes(hostname)) {
+        delete pendingTabs[tabId];
+        return;
+      }
+      // Otherwise reassign to correct container
     }
 
     const newTab = await browser.tabs.create({
