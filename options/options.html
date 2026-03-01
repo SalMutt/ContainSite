@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>ContainSite Options</title>
+  <link rel="stylesheet" href="options.css">
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>ContainSite</h1>
+      <span id="version"></span>
+    </header>
+
+    <main>
+      <section>
+        <h2>Fingerprint Vectors</h2>
+        <p class="desc">Control which fingerprint vectors are spoofed. Changes take effect on next page load.</p>
+        <div id="vector-grid"></div>
+      </section>
+
+      <section>
+        <h2>Domain Whitelist</h2>
+        <p class="desc">Whitelisted domains are never containerized or fingerprint-spoofed.</p>
+        <div class="whitelist-input">
+          <input type="text" id="wl-input" placeholder="example.com" spellcheck="false">
+          <button id="wl-add" class="btn">Add</button>
+        </div>
+        <div id="wl-list"></div>
+      </section>
+
+      <section>
+        <h2>Containers</h2>
+        <p class="desc">All containers managed by ContainSite.</p>
+        <table id="container-table">
+          <thead>
+            <tr>
+              <th></th>
+              <th>Domain</th>
+              <th>Spoofing</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="container-tbody"></tbody>
+        </table>
+        <div id="no-containers" class="empty" hidden>No containers yet. Browse a website to create one.</div>
+      </section>
+
+      <section>
+        <h2>Bulk Actions</h2>
+        <div class="bulk">
+          <button id="regen-all" class="btn">Regenerate All Fingerprints</button>
+          <div class="bulk-row">
+            <button id="prune" class="btn secondary">Prune Unused</button>
+            <button id="reset" class="btn danger">Reset All</button>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="options.js"></script>
+</body>
+</html>

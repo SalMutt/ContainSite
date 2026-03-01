@@ -15,6 +15,10 @@
   "background": {
     "scripts": ["lib/prng.js", "lib/fingerprint-gen.js", "background.js"]
   },
+  "options_ui": {
+    "page": "options/options.html",
+    "open_in_tab": true
+  },
   "browser_action": {
     "default_popup": "popup/popup.html",
     "default_icon": {

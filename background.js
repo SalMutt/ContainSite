@@ -5,7 +5,7 @@ const registeredScripts = {}; // cookieStoreId -> RegisteredContentScript
 let injectSourceCache = null;
 let domainMap = {};   // baseDomain -> cookieStoreId
 let pendingTabs = {}; // tabId -> true (tabs being redirected)
-let tabOrigins = {};  // tabId -> cookieStoreId (tracks which container a tab was assigned to)
+let cachedWhitelist = []; // domains that bypass containerization
 
 const CONTAINER_COLORS = ["blue", "turquoise", "green", "yellow", "orange", "red", "pink", "purple"];
 const CONTAINER_ICONS = ["fingerprint", "fence", "briefcase", "cart", "circle", "gift", "tree", "chill"];
@@ -82,6 +82,13 @@ async function registerForContainer(cookieStoreId, profile) {
   });
 }
 
+async function buildProfileAndRegister(cookieStoreId, seed) {
+  const profile = generateFingerprintProfile(seed);
+  const vsStored = await browser.storage.local.get("vectorSettings");
+  profile.vectors = vsStored.vectorSettings || {};
+  await registerForContainer(cookieStoreId, profile);
+}
+
 async function registerAllKnownContainers() {
   const stored = await browser.storage.local.get(["containerSeeds", "containerSettings"]);
   const seeds = stored.containerSeeds || {};
@@ -97,8 +104,7 @@ async function registerAllKnownContainers() {
   for (const [cookieStoreId, seed] of Object.entries(seeds)) {
     const cfg = settings[cookieStoreId] || { enabled: true };
     if (!cfg.enabled) continue;
-    const profile = generateFingerprintProfile(seed);
-    await registerForContainer(cookieStoreId, profile);
+    await buildProfileAndRegister(cookieStoreId, seed);
   }
 }
 
@@ -139,8 +145,7 @@ async function getOrCreateContainerForDomain(baseDomain) {
   seeds[cookieStoreId] = generateSeed();
   await browser.storage.local.set({ containerSeeds: seeds });
 
-  const profile = generateFingerprintProfile(seeds[cookieStoreId]);
-  await registerForContainer(cookieStoreId, profile);
+  await buildProfileAndRegister(cookieStoreId, seeds[cookieStoreId]);
 
   return cookieStoreId;
 }
@@ -148,18 +153,12 @@ async function getOrCreateContainerForDomain(baseDomain) {
 // tabId -> baseDomain — tabs we just created, skip only for the same domain
 const createdByUs = {};
 
-// Reverse lookup: find what domain a container was created for
-function getContainerDomain(cookieStoreId) {
-  for (const [domain, cid] of Object.entries(domainMap)) {
-    if (cid === cookieStoreId) return domain;
-  }
-  return null;
-}
-
 // Handle a tab that needs to be in a container for a given domain
 async function assignTabToContainer(tabId, url, baseDomain) {
   // Skip tabs we just created — but only for the domain we created them for
   if (createdByUs[tabId] === baseDomain) return;
+  // Skip whitelisted domains
+  if (cachedWhitelist.includes(baseDomain)) return;
   if (pendingTabs[tabId]) return;
   pendingTabs[tabId] = true;
 
@@ -232,30 +231,22 @@ browser.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
 // Clean up tab tracking when tabs close
 browser.tabs.onRemoved.addListener((tabId) => {
   delete pendingTabs[tabId];
-  delete tabOrigins[tabId];
 });
 
-// --- Message Handling (from popup) ---
+// --- Message Handling (from popup and options page) ---
 
 browser.runtime.onMessage.addListener((message, sender) => {
-  if (message.type === "getContainerList") {
-    return handleGetContainerList();
-  }
-  if (message.type === "toggleContainer") {
-    return handleToggle(message.cookieStoreId, message.enabled);
-  }
-  if (message.type === "regenerateFingerprint") {
-    return handleRegenerate(message.cookieStoreId);
-  }
-  if (message.type === "regenerateAll") {
-    return handleRegenerateAll();
-  }
-  if (message.type === "resetAll") {
-    return handleResetAll();
-  }
-  if (message.type === "pruneContainers") {
-    return handlePruneContainers();
-  }
+  if (message.type === "getContainerList") return handleGetContainerList();
+  if (message.type === "toggleContainer") return handleToggle(message.cookieStoreId, message.enabled);
+  if (message.type === "regenerateFingerprint") return handleRegenerate(message.cookieStoreId);
+  if (message.type === "regenerateAll") return handleRegenerateAll();
+  if (message.type === "resetAll") return handleResetAll();
+  if (message.type === "pruneContainers") return handlePruneContainers();
+  if (message.type === "deleteContainer") return handleDeleteContainer(message.cookieStoreId);
+  if (message.type === "getWhitelist") return handleGetWhitelist();
+  if (message.type === "setWhitelist") return handleSetWhitelist(message.whitelist);
+  if (message.type === "getVectorSettings") return handleGetVectorSettings();
+  if (message.type === "setVectorSettings") return handleSetVectorSettings(message.vectorSettings);
 });
 
 async function handleGetContainerList() {
@@ -295,8 +286,7 @@ async function handleToggle(cookieStoreId, enabled) {
     const seedStored = await browser.storage.local.get("containerSeeds");
     const seeds = seedStored.containerSeeds || {};
     if (seeds[cookieStoreId]) {
-      const profile = generateFingerprintProfile(seeds[cookieStoreId]);
-      await registerForContainer(cookieStoreId, profile);
+      await buildProfileAndRegister(cookieStoreId, seeds[cookieStoreId]);
     }
   }
   return { ok: true };
@@ -312,8 +302,7 @@ async function handleRegenerate(cookieStoreId) {
 
   const cfg = settings[cookieStoreId] || { enabled: true };
   if (cfg.enabled) {
-    const profile = generateFingerprintProfile(seeds[cookieStoreId]);
-    await registerForContainer(cookieStoreId, profile);
+    await buildProfileAndRegister(cookieStoreId, seeds[cookieStoreId]);
   }
   return { ok: true };
 }
@@ -351,7 +340,7 @@ async function handleResetAll() {
   // Clear all storage
   domainMap = {};
   pendingTabs = {};
-  tabOrigins = {};
+  cachedWhitelist = [];
   managedContainerIds.clear();
   await browser.storage.local.clear();
 
@@ -379,6 +368,41 @@ async function handlePruneContainers() {
   return { pruned };
 }
 
+async function handleDeleteContainer(cookieStoreId) {
+  try {
+    await browser.contextualIdentities.remove(cookieStoreId);
+  } catch(e) {}
+  const stored = await browser.storage.local.get(["containerSeeds", "containerSettings"]);
+  const seeds = stored.containerSeeds || {};
+  const settings = stored.containerSettings || {};
+  delete seeds[cookieStoreId];
+  delete settings[cookieStoreId];
+  await browser.storage.local.set({ containerSeeds: seeds, containerSettings: settings });
+  return { ok: true };
+}
+
+async function handleGetWhitelist() {
+  const stored = await browser.storage.local.get("whitelist");
+  return stored.whitelist || [];
+}
+
+async function handleSetWhitelist(whitelist) {
+  cachedWhitelist = whitelist;
+  await browser.storage.local.set({ whitelist });
+  return { ok: true };
+}
+
+async function handleGetVectorSettings() {
+  const stored = await browser.storage.local.get("vectorSettings");
+  return stored.vectorSettings || {};
+}
+
+async function handleSetVectorSettings(vectorSettings) {
+  await browser.storage.local.set({ vectorSettings });
+  await registerAllKnownContainers();
+  return { ok: true };
+}
+
 // --- Container Lifecycle ---
 
 browser.contextualIdentities.onRemoved.addListener(async ({ contextualIdentity }) => {
@@ -400,12 +424,12 @@ browser.contextualIdentities.onRemoved.addListener(async ({ contextualIdentity }
 
 async function init() {
   await loadDomainMap();
-  // Populate managedContainerIds from stored seeds
-  const stored = await browser.storage.local.get("containerSeeds");
+  const stored = await browser.storage.local.get(["containerSeeds", "whitelist"]);
   const seeds = stored.containerSeeds || {};
   for (const cid of Object.keys(seeds)) {
     managedContainerIds.add(cid);
   }
+  cachedWhitelist = stored.whitelist || [];
   await registerAllKnownContainers();
 }
 
