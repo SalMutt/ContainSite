@@ -10,6 +10,9 @@ let tabOrigins = {};  // tabId -> cookieStoreId (tracks which container a tab wa
 const CONTAINER_COLORS = ["blue", "turquoise", "green", "yellow", "orange", "red", "pink", "purple"];
 const CONTAINER_ICONS = ["fingerprint", "fence", "briefcase", "cart", "circle", "gift", "tree", "chill"];
 
+// All container IDs we've created — used for ownership checks on cross-domain navigation
+const managedContainerIds = new Set();
+
 // --- Domain Extraction ---
 
 function extractDomain(url) {
@@ -128,6 +131,7 @@ async function getOrCreateContainerForDomain(baseDomain) {
 
   const cookieStoreId = container.cookieStoreId;
   domainMap[baseDomain] = cookieStoreId;
+  managedContainerIds.add(cookieStoreId);
   await saveDomainMap();
 
   const stored = await browser.storage.local.get("containerSeeds");
@@ -141,32 +145,42 @@ async function getOrCreateContainerForDomain(baseDomain) {
   return cookieStoreId;
 }
 
-// Set of tabIds we just created — skip these entirely to prevent loops
+// tabId -> baseDomain — tabs we just created, skip only for the same domain
 const createdByUs = {};
+
+// Reverse lookup: find what domain a container was created for
+function getContainerDomain(cookieStoreId) {
+  for (const [domain, cid] of Object.entries(domainMap)) {
+    if (cid === cookieStoreId) return domain;
+  }
+  return null;
+}
 
 // Handle a tab that needs to be in a container for a given domain
 async function assignTabToContainer(tabId, url, baseDomain) {
-  // Skip tabs we just created
-  if (createdByUs[tabId]) return;
+  // Skip tabs we just created — but only for the domain we created them for
+  if (createdByUs[tabId] === baseDomain) return;
   if (pendingTabs[tabId]) return;
   pendingTabs[tabId] = true;
 
   try {
     const tab = await browser.tabs.get(tabId);
+    const cookieStoreId = await getOrCreateContainerForDomain(baseDomain);
 
-    // If the tab is in ANY non-default container, leave it alone.
-    // Either it's one of ours, or the user put it there intentionally.
-    if (tab.cookieStoreId !== "firefox-default") {
+    if (tab.cookieStoreId === cookieStoreId) {
+      // Already in the correct container
       delete pendingTabs[tabId];
       return;
     }
 
-    // Tab is in the default (uncontained) context — assign it to the right container
-    const cookieStoreId = await getOrCreateContainerForDomain(baseDomain);
-
-    if (tab.cookieStoreId === cookieStoreId) {
-      delete pendingTabs[tabId];
-      return;
+    if (tab.cookieStoreId !== "firefox-default") {
+      // Tab is in a non-default container — only reassign if it's one we manage
+      if (!managedContainerIds.has(tab.cookieStoreId)) {
+        // Not a ContainSite-managed container — leave it alone
+        delete pendingTabs[tabId];
+        return;
+      }
+      // It's our container but wrong domain — reassign to correct container
     }
 
     const newTab = await browser.tabs.create({
@@ -175,8 +189,8 @@ async function assignTabToContainer(tabId, url, baseDomain) {
       index: tab.index + 1,
       active: tab.active
     });
-    // Mark the new tab so we never redirect it again
-    createdByUs[newTab.id] = true;
+    // Mark the new tab — only skip reassignment for this same domain
+    createdByUs[newTab.id] = baseDomain;
     setTimeout(() => { delete createdByUs[newTab.id]; }, 5000);
 
     await browser.tabs.remove(tabId);
@@ -338,6 +352,7 @@ async function handleResetAll() {
   domainMap = {};
   pendingTabs = {};
   tabOrigins = {};
+  managedContainerIds.clear();
   await browser.storage.local.clear();
 
   return { ok: true };
@@ -346,7 +361,6 @@ async function handleResetAll() {
 async function handlePruneContainers() {
   // Remove containers that have no open tabs
   const containers = await browser.contextualIdentities.query({});
-  const ourContainerIds = new Set(Object.values(domainMap));
   const tabs = await browser.tabs.query({});
 
   // Collect cookieStoreIds that have open tabs
@@ -354,12 +368,12 @@ async function handlePruneContainers() {
 
   let pruned = 0;
   for (const c of containers) {
-    if (ourContainerIds.has(c.cookieStoreId) && !activeContainers.has(c.cookieStoreId)) {
+    if (managedContainerIds.has(c.cookieStoreId) && !activeContainers.has(c.cookieStoreId)) {
       try {
         await browser.contextualIdentities.remove(c.cookieStoreId);
         pruned++;
       } catch(e) {}
-      // domainMap cleanup happens via the onRemoved listener
+      // onRemoved listener handles domainMap + managedContainerIds cleanup
     }
   }
   return { pruned };
@@ -369,6 +383,7 @@ async function handlePruneContainers() {
 
 browser.contextualIdentities.onRemoved.addListener(async ({ contextualIdentity }) => {
   const cid = contextualIdentity.cookieStoreId;
+  managedContainerIds.delete(cid);
   if (registeredScripts[cid]) {
     try { await registeredScripts[cid].unregister(); } catch(e) {}
     delete registeredScripts[cid];
@@ -385,6 +400,12 @@ browser.contextualIdentities.onRemoved.addListener(async ({ contextualIdentity }
 
 async function init() {
   await loadDomainMap();
+  // Populate managedContainerIds from stored seeds
+  const stored = await browser.storage.local.get("containerSeeds");
+  const seeds = stored.containerSeeds || {};
+  for (const cid of Object.keys(seeds)) {
+    managedContainerIds.add(cid);
+  }
   await registerAllKnownContainers();
 }
 
