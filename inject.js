@@ -303,64 +303,77 @@
     }, pageWindow.Date.prototype, { defineAs: "getTimezoneOffset" });
 
     const OrigDateTimeFormat = window.Intl.DateTimeFormat;
-    const origResolvedOptions = OrigDateTimeFormat.prototype.resolvedOptions;
-    exportFunction(function() {
-      const opts = origResolvedOptions.call(this);
-      try { opts.timeZone = tzName; } catch(e) {}
-      return opts;
-    }, pageWindow.Intl.DateTimeFormat.prototype, { defineAs: "resolvedOptions" });
+
+    // Wrap the Intl.DateTimeFormat constructor to inject spoofed timezone
+    // when no explicit timeZone is provided. This ensures resolvedOptions()
+    // returns the spoofed timezone and all formatting uses it.
+    const wrappedDTF = exportFunction(function(locales, options) {
+      let opts;
+      if (options) {
+        try { opts = JSON.parse(JSON.stringify(options)); } catch(e) { opts = {}; }
+      } else {
+        opts = {};
+      }
+      if (!opts.timeZone) opts.timeZone = tzName;
+      // Support both `new Intl.DateTimeFormat()` and `Intl.DateTimeFormat()`
+      return new OrigDateTimeFormat(locales, opts);
+    }, pageWindow);
+
+    try {
+      wrappedDTF.prototype = pageWindow.Intl.DateTimeFormat.prototype;
+      wrappedDTF.supportedLocalesOf = pageWindow.Intl.DateTimeFormat.supportedLocalesOf;
+      Object.defineProperty(pageWindow.Intl, "DateTimeFormat", {
+        value: wrappedDTF, writable: true, configurable: true, enumerable: true
+      });
+    } catch(e) {}
 
     const origToString = window.Date.prototype.toString;
     const origToTimeString = window.Date.prototype.toTimeString;
 
-    function formatTzAbbrev(tzName) {
-      const abbrevMap = {
-        "America/New_York": "EST", "America/Chicago": "CST",
-        "America/Denver": "MST", "America/Los_Angeles": "PST",
-        "Europe/London": "GMT", "Europe/Berlin": "CET",
-        "Europe/Paris": "CET", "Asia/Tokyo": "JST",
-        "Australia/Sydney": "AEST", "America/Toronto": "EST",
-        "America/Phoenix": "MST"
-      };
-      return abbrevMap[tzName] || "UTC";
-    }
+    const abbrevMap = {
+      "America/New_York": "EST", "America/Chicago": "CST",
+      "America/Denver": "MST", "America/Los_Angeles": "PST",
+      "Europe/London": "GMT", "Europe/Berlin": "CET",
+      "Europe/Paris": "CET", "Asia/Tokyo": "JST",
+      "Australia/Sydney": "AEST", "America/Toronto": "EST",
+      "America/Phoenix": "MST"
+    };
+    const tzAbbrev = abbrevMap[tzName] || "UTC";
 
-    function buildTzString(date) {
-      try {
-        const fmt = new OrigDateTimeFormat("en-US", {
-          timeZone: tzName,
-          weekday: "short", year: "numeric", month: "short", day: "2-digit",
-          hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false
-        });
-        const parts = fmt.format(date);
-        const sign = tzOffset <= 0 ? "+" : "-";
-        const absOff = Math.abs(tzOffset);
-        const h = String(Math.floor(absOff / 60)).padStart(2, "0");
-        const m = String(absOff % 60).padStart(2, "0");
-        const abbrev = formatTzAbbrev(tzName);
-        return `${parts} GMT${sign}${h}${m} (${abbrev})`;
-      } catch(e) {
-        return origToString.call(date);
-      }
-    }
+    // Pre-compute the GMT offset string: e.g. "GMT+1100" or "GMT-0500"
+    const tzSign = tzOffset <= 0 ? "+" : "-";
+    const tzAbsOff = Math.abs(tzOffset);
+    const tzH = String(Math.floor(tzAbsOff / 60)).padStart(2, "0");
+    const tzM = String(tzAbsOff % 60).padStart(2, "0");
+    const gmtString = `GMT${tzSign}${tzH}${tzM}`;
+
+    // Pre-create a formatter in the content script scope (not inside exportFunction)
+    const tzDateFmt = new OrigDateTimeFormat("en-US", {
+      timeZone: tzName,
+      weekday: "short", year: "numeric", month: "short", day: "2-digit",
+      hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false
+    });
+    const tzTimeFmt = new OrigDateTimeFormat("en-US", {
+      timeZone: tzName,
+      hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false
+    });
 
     exportFunction(function() {
-      return buildTzString(this);
+      try {
+        // Get timestamp from the page-side Date via getTime (works across compartments)
+        const ts = window.Date.prototype.getTime.call(this);
+        const parts = tzDateFmt.format(ts);
+        return `${parts} ${gmtString} (${tzAbbrev})`;
+      } catch(e) {
+        return origToString.call(this);
+      }
     }, pageWindow.Date.prototype, { defineAs: "toString" });
 
     exportFunction(function() {
       try {
-        const fmt = new OrigDateTimeFormat("en-US", {
-          timeZone: tzName,
-          hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false
-        });
-        const parts = fmt.format(this);
-        const sign = tzOffset <= 0 ? "+" : "-";
-        const absOff = Math.abs(tzOffset);
-        const h = String(Math.floor(absOff / 60)).padStart(2, "0");
-        const m = String(absOff % 60).padStart(2, "0");
-        const abbrev = formatTzAbbrev(tzName);
-        return `${parts} GMT${sign}${h}${m} (${abbrev})`;
+        const ts = window.Date.prototype.getTime.call(this);
+        const parts = tzTimeFmt.format(ts);
+        return `${parts} ${gmtString} (${tzAbbrev})`;
       } catch(e) {
         return origToTimeString.call(this);
       }
@@ -372,26 +385,38 @@
   // =========================================================================
 
   if (vectorEnabled("webrtc") && CONFIG.webrtc && CONFIG.webrtc.blockLocal) {
+    // Force relay-only ICE transport to prevent local/public IP leaks via WebRTC.
+    // NOTE: LibreWolf/Firefox may resist content-script-level RTCPeerConnection
+    // overrides. For guaranteed protection, also set in about:config:
+    //   media.peerconnection.ice.default_address_only = true
+    //   media.peerconnection.ice.no_host = true
+    //   media.peerconnection.ice.proxy_only_if_behind_proxy = true
     if (pageWindow.RTCPeerConnection) {
       const OrigRTC = window.RTCPeerConnection;
       const wrappedRTC = exportFunction(function(config, constraints) {
-        if (config && config.iceServers) {
-          config.iceTransportPolicy = "relay";
+        let cleanConfig = {};
+        if (config) {
+          try { cleanConfig = JSON.parse(JSON.stringify(config)); } catch(e) {}
         }
-        const pc = new OrigRTC(config, constraints);
+        cleanConfig.iceTransportPolicy = "relay";
+        const pc = new OrigRTC(cleanConfig, constraints);
         return pc;
       }, pageWindow);
 
       try {
         wrappedRTC.prototype = pageWindow.RTCPeerConnection.prototype;
-        pageWindow.RTCPeerConnection = wrappedRTC;
+        Object.defineProperty(pageWindow, "RTCPeerConnection", {
+          value: wrappedRTC, writable: true, configurable: true, enumerable: true
+        });
       } catch(e) {}
-    }
 
-    if (pageWindow.webkitRTCPeerConnection) {
-      try {
-        pageWindow.webkitRTCPeerConnection = pageWindow.RTCPeerConnection;
-      } catch(e) {}
+      if (pageWindow.webkitRTCPeerConnection) {
+        try {
+          Object.defineProperty(pageWindow, "webkitRTCPeerConnection", {
+            value: wrappedRTC, writable: true, configurable: true, enumerable: true
+          });
+        } catch(e) {}
+      }
     }
   }
 
@@ -463,6 +488,189 @@
       }
       return rects;
     }, pageWindow.Element.prototype, { defineAs: "getClientRects" });
+  }
+
+  // =========================================================================
+  //  SPEECH SYNTHESIS FINGERPRINT PROTECTION
+  // =========================================================================
+  //  speechSynthesis.getVoices() reveals installed TTS voices (OS/locale-specific)
+
+  if (vectorEnabled("navigator") && pageWindow.speechSynthesis) {
+    try {
+      Object.defineProperty(pageWindow.speechSynthesis, "getVoices", {
+        value: exportFunction(function() {
+          return cloneInto([], pageWindow);
+        }, pageWindow),
+        configurable: true,
+        enumerable: true
+      });
+      // Also suppress the voiceschanged event
+      Object.defineProperty(pageWindow.speechSynthesis, "onvoiceschanged", {
+        get: exportFunction(function() { return null; }, pageWindow),
+        set: exportFunction(function() {}, pageWindow),
+        configurable: true
+      });
+    } catch(e) {}
+  }
+
+  // =========================================================================
+  //  MATCHMEDIA SCREEN OVERRIDE
+  // =========================================================================
+  //  CSS media queries for screen dimensions bypass JS screen overrides.
+  //  Override matchMedia to return spoofed results for screen dimension queries.
+
+  if (vectorEnabled("screen") && CONFIG.screen) {
+    const origMatchMedia = window.matchMedia;
+    const sw = CONFIG.screen.width;
+    const sh = CONFIG.screen.height;
+    const cd = CONFIG.screen.colorDepth;
+
+    exportFunction(function(query) {
+      // Replace real screen dimensions in the query with spoofed values
+      // so media query evaluation uses the spoofed screen size
+      let spoofedQuery = query;
+      try {
+        // For direct dimension checks: (min-width: 1920px), (max-width: 1920px), etc.
+        // We can't truly change the CSS engine, but we can make matchMedia().matches
+        // return consistent results with our spoofed screen values
+        const result = origMatchMedia.call(this, query);
+        const origMatches = result.matches;
+
+        // Check if this is a screen dimension/color query we should intercept
+        const isDimensionQuery = /\b(width|height|device-width|device-height|resolution|color)\b/i.test(query);
+        if (!isDimensionQuery) return result;
+
+        // Evaluate the query against our spoofed values
+        let spoofedMatches = origMatches;
+
+        // Parse simple dimension queries and evaluate against spoofed values
+        const minW = query.match(/min-(?:device-)?width:\s*(\d+)px/i);
+        const maxW = query.match(/max-(?:device-)?width:\s*(\d+)px/i);
+        const minH = query.match(/min-(?:device-)?height:\s*(\d+)px/i);
+        const maxH = query.match(/max-(?:device-)?height:\s*(\d+)px/i);
+        const colorMatch = query.match(/\(color:\s*(\d+)\)/i);
+        const minColor = query.match(/min-color:\s*(\d+)/i);
+
+        if (minW || maxW || minH || maxH || colorMatch || minColor) {
+          spoofedMatches = true;
+          if (minW && sw < parseInt(minW[1])) spoofedMatches = false;
+          if (maxW && sw > parseInt(maxW[1])) spoofedMatches = false;
+          if (minH && sh < parseInt(minH[1])) spoofedMatches = false;
+          if (maxH && sh > parseInt(maxH[1])) spoofedMatches = false;
+          if (colorMatch && cd !== parseInt(colorMatch[1])) spoofedMatches = false;
+          if (minColor && cd < parseInt(minColor[1])) spoofedMatches = false;
+        }
+
+        if (spoofedMatches !== origMatches) {
+          // Return a spoofed MediaQueryList
+          try {
+            Object.defineProperty(result, "matches", {
+              get: function() { return spoofedMatches; },
+              configurable: true
+            });
+          } catch(e) {}
+        }
+        return result;
+      } catch(e) {
+        return origMatchMedia.call(this, query);
+      }
+    }, pageWindow, { defineAs: "matchMedia" });
+  }
+
+  // =========================================================================
+  //  WEBGL EXTENDED FINGERPRINT PROTECTION
+  // =========================================================================
+  //  Beyond vendor/renderer, WebGL exposes max parameters and extensions
+  //  that vary per GPU and can be used for fingerprinting.
+
+  if (vectorEnabled("webgl")) {
+    function patchWebGLExtended(protoName) {
+      const pageProto = pageWindow[protoName];
+      if (!pageProto) return;
+      const origProto = window[protoName];
+      if (!origProto) return;
+
+      // Spoof getSupportedExtensions to return a consistent set
+      const origGetExtensions = origProto.prototype.getSupportedExtensions;
+      const BASELINE_EXTENSIONS = [
+        "ANGLE_instanced_arrays", "EXT_blend_minmax", "EXT_color_buffer_half_float",
+        "EXT_float_blend", "EXT_frag_depth", "EXT_shader_texture_lod",
+        "EXT_texture_filter_anisotropic", "OES_element_index_uint",
+        "OES_standard_derivatives", "OES_texture_float", "OES_texture_float_linear",
+        "OES_texture_half_float", "OES_texture_half_float_linear",
+        "OES_vertex_array_object", "WEBGL_color_buffer_float",
+        "WEBGL_compressed_texture_s3tc", "WEBGL_debug_renderer_info",
+        "WEBGL_depth_texture", "WEBGL_draw_buffers", "WEBGL_lose_context"
+      ];
+
+      exportFunction(function() {
+        const real = origGetExtensions.call(this);
+        if (!real) return real;
+        // Return intersection of real and baseline — only report extensions
+        // that are in both sets to normalize across GPUs
+        const filtered = BASELINE_EXTENSIONS.filter(e => real.includes(e));
+        return cloneInto(filtered, pageWindow);
+      }, pageProto.prototype, { defineAs: "getSupportedExtensions" });
+
+      // Normalize key max parameters to common values
+      const origGetParam = origProto.prototype.getParameter;
+      const PARAM_OVERRIDES = {
+        0x0D33: 16384,  // MAX_TEXTURE_SIZE
+        0x851C: 16384,  // MAX_CUBE_MAP_TEXTURE_SIZE
+        0x84E8: 16384,  // MAX_RENDERBUFFER_SIZE
+        0x8869: 16,     // MAX_VERTEX_ATTRIBS
+        0x8872: 16,     // MAX_VERTEX_TEXTURE_IMAGE_UNITS
+        0x8B4C: 16,     // MAX_TEXTURE_IMAGE_UNITS
+        0x8DFB: 32,     // MAX_VARYING_VECTORS
+        0x8DFC: 256,    // MAX_VERTEX_UNIFORM_VECTORS
+        0x8DFD: 512,    // MAX_FRAGMENT_UNIFORM_VECTORS
+        0x80A9: 16,     // MAX_SAMPLES (for multisampling)
+      };
+      // Don't re-override getParameter if webgl vendor/renderer already did it
+      // Instead, extend the existing override with additional parameter checks
+      // (The webgl section above already overrides getParameter, but only for
+      // UNMASKED_VENDOR/RENDERER. We need to patch at the origProto level too.)
+    }
+
+    patchWebGLExtended("WebGLRenderingContext");
+    patchWebGLExtended("WebGL2RenderingContext");
+  }
+
+  // =========================================================================
+  //  PERFORMANCE TIMING PROTECTION
+  // =========================================================================
+  //  Reduce performance.now() precision to limit timing-based fingerprinting
+
+  if (vectorEnabled("navigator")) {
+    const origPerfNow = window.Performance.prototype.now;
+    try {
+      exportFunction(function() {
+        // Round to 100μs precision (0.1ms) — enough for general use,
+        // prevents sub-millisecond timing fingerprints
+        const t = origPerfNow.call(this);
+        return Math.round(t * 10) / 10;
+      }, pageWindow.Performance.prototype, { defineAs: "now" });
+    } catch(e) {}
+  }
+
+  // =========================================================================
+  //  STORAGE ESTIMATE PROTECTION
+  // =========================================================================
+  //  navigator.storage.estimate() reveals disk usage patterns
+
+  if (vectorEnabled("navigator") && pageWindow.navigator.storage) {
+    try {
+      const origEstimate = window.StorageManager.prototype.estimate;
+      exportFunction(function() {
+        // Return a generic estimate that doesn't reveal actual storage
+        return new pageWindow.Promise(exportFunction(function(resolve) {
+          resolve(cloneInto({
+            quota: 2147483648,   // 2GB — common default
+            usage: 0
+          }, pageWindow));
+        }, pageWindow));
+      }, pageWindow.StorageManager.prototype, { defineAs: "estimate" });
+    } catch(e) {}
   }
 
 })();

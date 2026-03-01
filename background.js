@@ -2,6 +2,7 @@
 // Every site gets its own container. Auth redirects stay in the originating container.
 
 const registeredScripts = {}; // cookieStoreId -> RegisteredContentScript
+const containerProfiles = {}; // cookieStoreId -> { userAgent, languages } for HTTP header spoofing
 let injectSourceCache = null;
 let domainMap = {};   // baseDomain -> cookieStoreId
 let pendingTabs = {}; // tabId -> true (tabs being redirected)
@@ -86,6 +87,13 @@ async function buildProfileAndRegister(cookieStoreId, seed) {
   const profile = generateFingerprintProfile(seed);
   const vsStored = await browser.storage.local.get("vectorSettings");
   profile.vectors = vsStored.vectorSettings || {};
+
+  // Cache profile for HTTP header spoofing
+  containerProfiles[cookieStoreId] = {
+    userAgent: profile.nav.userAgent,
+    languages: profile.nav.languages
+  };
+
   await registerForContainer(cookieStoreId, profile);
 }
 
@@ -337,11 +345,12 @@ async function handleResetAll() {
     }
   }
 
-  // Clear all storage
+  // Clear all storage and caches
   domainMap = {};
   pendingTabs = {};
   cachedWhitelist = [];
   managedContainerIds.clear();
+  for (const key of Object.keys(containerProfiles)) delete containerProfiles[key];
   await browser.storage.local.clear();
 
   return { ok: true };
@@ -408,6 +417,7 @@ async function handleSetVectorSettings(vectorSettings) {
 browser.contextualIdentities.onRemoved.addListener(async ({ contextualIdentity }) => {
   const cid = contextualIdentity.cookieStoreId;
   managedContainerIds.delete(cid);
+  delete containerProfiles[cid];
   if (registeredScripts[cid]) {
     try { await registeredScripts[cid].unregister(); } catch(e) {}
     delete registeredScripts[cid];
@@ -419,6 +429,40 @@ browser.contextualIdentities.onRemoved.addListener(async ({ contextualIdentity }
   }
   await saveDomainMap();
 });
+
+// --- HTTP Header Spoofing ---
+// Modifies User-Agent and Accept-Language headers to match each container's
+// spoofed profile, preventing server-side detection of JS/HTTP header mismatch.
+
+function formatAcceptLanguage(languages) {
+  if (!languages || languages.length === 0) return "en-US,en;q=0.5";
+  return languages.map((lang, i) => {
+    if (i === 0) return lang;
+    const q = Math.max(0.1, 1 - i * 0.1).toFixed(1);
+    return `${lang};q=${q}`;
+  }).join(",");
+}
+
+browser.webRequest.onBeforeSendHeaders.addListener(
+  function(details) {
+    // cookieStoreId is available in Firefox 77+ webRequest details
+    const profile = containerProfiles[details.cookieStoreId];
+    if (!profile) return {};
+
+    const headers = details.requestHeaders;
+    for (let i = 0; i < headers.length; i++) {
+      const name = headers[i].name.toLowerCase();
+      if (name === "user-agent") {
+        headers[i].value = profile.userAgent;
+      } else if (name === "accept-language") {
+        headers[i].value = formatAcceptLanguage(profile.languages);
+      }
+    }
+    return { requestHeaders: headers };
+  },
+  { urls: ["<all_urls>"] },
+  ["blocking", "requestHeaders"]
+);
 
 // --- Init ---
 

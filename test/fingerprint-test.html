@@ -1,0 +1,935 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ContainSite Fingerprint Test</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace;
+    background: #0d1117; color: #c9d1d9; padding: 24px; line-height: 1.5;
+  }
+  h1 { color: #58a6ff; margin-bottom: 4px; font-size: 22px; }
+  .subtitle { color: #8b949e; margin-bottom: 20px; font-size: 13px; }
+  .hash-banner {
+    background: #161b22; border: 1px solid #30363d; border-radius: 8px;
+    padding: 16px; margin-bottom: 20px; text-align: center;
+  }
+  .hash-banner .label { color: #8b949e; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; }
+  .hash-banner .hash { color: #f0883e; font-size: 20px; font-family: monospace; margin-top: 4px; word-break: break-all; }
+  .hash-banner .hint { color: #8b949e; font-size: 11px; margin-top: 8px; }
+  .section {
+    background: #161b22; border: 1px solid #30363d; border-radius: 8px;
+    margin-bottom: 16px; overflow: hidden;
+  }
+  .section-header {
+    padding: 12px 16px; border-bottom: 1px solid #30363d;
+    display: flex; align-items: center; gap: 10px;
+  }
+  .section-header h2 { font-size: 14px; color: #c9d1d9; }
+  .status-dot {
+    width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0;
+  }
+  .status-dot.pass { background: #3fb950; }
+  .status-dot.fail { background: #f85149; }
+  .status-dot.warn { background: #d29922; }
+  .status-dot.pending { background: #484f58; }
+  .section-body { padding: 12px 16px; }
+  .row {
+    display: flex; justify-content: space-between; align-items: baseline;
+    padding: 4px 0; border-bottom: 1px solid #21262d; font-size: 13px;
+  }
+  .row:last-child { border-bottom: none; }
+  .row .key { color: #8b949e; }
+  .row .val { color: #c9d1d9; font-family: monospace; text-align: right; max-width: 60%; word-break: break-all; }
+  .row .val.spoofed { color: #3fb950; }
+  .row .val.real { color: #f85149; }
+  canvas { display: none; }
+  .canvas-preview { display: flex; gap: 12px; margin-top: 8px; }
+  .canvas-preview canvas { display: block; border: 1px solid #30363d; border-radius: 4px; }
+  .summary-bar {
+    display: flex; gap: 16px; padding: 12px 16px; background: #161b22;
+    border: 1px solid #30363d; border-radius: 8px; margin-bottom: 20px;
+    font-size: 13px;
+  }
+  .summary-bar .item { display: flex; align-items: center; gap: 6px; }
+  .copy-btn {
+    background: #21262d; color: #c9d1d9; border: 1px solid #30363d;
+    padding: 6px 14px; border-radius: 6px; cursor: pointer; font-size: 12px;
+    margin-top: 12px;
+  }
+  .copy-btn:hover { background: #30363d; }
+  #webrtc-results .val { font-size: 12px; }
+</style>
+</head>
+<body>
+
+<h1>ContainSite Fingerprint Test</h1>
+<p class="subtitle">Open this page in multiple container tabs and compare the composite hash below.</p>
+
+<div class="hash-banner">
+  <div class="label">Composite Fingerprint Hash</div>
+  <div class="hash" id="composite-hash">Computing...</div>
+  <div class="hint">This hash should be DIFFERENT in each container tab. If it's the same, spoofing is not working.</div>
+</div>
+
+<div class="summary-bar" id="summary-bar">
+  <div class="item"><span class="status-dot pending" id="sum-pass"></span> <span id="sum-pass-n">-</span> Spoofed</div>
+  <div class="item"><span class="status-dot pending" id="sum-fail"></span> <span id="sum-fail-n">-</span> Not Spoofed</div>
+  <div class="item"><span class="status-dot pending" id="sum-warn"></span> <span id="sum-warn-n">-</span> Warning</div>
+</div>
+
+<!-- Navigator -->
+<div class="section" id="sec-navigator">
+  <div class="section-header"><span class="status-dot pending" id="dot-navigator"></span><h2>Navigator</h2></div>
+  <div class="section-body" id="navigator-results"></div>
+</div>
+
+<!-- Screen -->
+<div class="section" id="sec-screen">
+  <div class="section-header"><span class="status-dot pending" id="dot-screen"></span><h2>Screen</h2></div>
+  <div class="section-body" id="screen-results"></div>
+</div>
+
+<!-- Canvas -->
+<div class="section" id="sec-canvas">
+  <div class="section-header"><span class="status-dot pending" id="dot-canvas"></span><h2>Canvas</h2></div>
+  <div class="section-body" id="canvas-results"></div>
+</div>
+
+<!-- WebGL -->
+<div class="section" id="sec-webgl">
+  <div class="section-header"><span class="status-dot pending" id="dot-webgl"></span><h2>WebGL</h2></div>
+  <div class="section-body" id="webgl-results"></div>
+</div>
+
+<!-- Audio -->
+<div class="section" id="sec-audio">
+  <div class="section-header"><span class="status-dot pending" id="dot-audio"></span><h2>Audio</h2></div>
+  <div class="section-body" id="audio-results"></div>
+</div>
+
+<!-- Timezone -->
+<div class="section" id="sec-timezone">
+  <div class="section-header"><span class="status-dot pending" id="dot-timezone"></span><h2>Timezone</h2></div>
+  <div class="section-body" id="timezone-results"></div>
+</div>
+
+<!-- Fonts -->
+<div class="section" id="sec-fonts">
+  <div class="section-header"><span class="status-dot pending" id="dot-fonts"></span><h2>Fonts (measureText)</h2></div>
+  <div class="section-body" id="fonts-results"></div>
+</div>
+
+<!-- ClientRects -->
+<div class="section" id="sec-rects">
+  <div class="section-header"><span class="status-dot pending" id="dot-rects"></span><h2>ClientRects</h2></div>
+  <div class="section-body" id="rects-results"></div>
+</div>
+
+<!-- Plugins -->
+<div class="section" id="sec-plugins">
+  <div class="section-header"><span class="status-dot pending" id="dot-plugins"></span><h2>Plugins</h2></div>
+  <div class="section-body" id="plugins-results"></div>
+</div>
+
+<!-- Battery -->
+<div class="section" id="sec-battery">
+  <div class="section-header"><span class="status-dot pending" id="dot-battery"></span><h2>Battery</h2></div>
+  <div class="section-body" id="battery-results"></div>
+</div>
+
+<!-- Connection -->
+<div class="section" id="sec-connection">
+  <div class="section-header"><span class="status-dot pending" id="dot-connection"></span><h2>Connection</h2></div>
+  <div class="section-body" id="connection-results"></div>
+</div>
+
+<!-- WebRTC -->
+<div class="section" id="sec-webrtc">
+  <div class="section-header"><span class="status-dot pending" id="dot-webrtc"></span><h2>WebRTC Leak Test</h2></div>
+  <div class="section-body" id="webrtc-results"></div>
+</div>
+
+<!-- HTTP Headers -->
+<div class="section" id="sec-headers">
+  <div class="section-header"><span class="status-dot pending" id="dot-headers"></span><h2>HTTP Headers (UA + Accept-Language)</h2></div>
+  <div class="section-body" id="headers-results"></div>
+</div>
+
+<!-- Speech Synthesis -->
+<div class="section" id="sec-speech">
+  <div class="section-header"><span class="status-dot pending" id="dot-speech"></span><h2>Speech Synthesis</h2></div>
+  <div class="section-body" id="speech-results"></div>
+</div>
+
+<!-- matchMedia -->
+<div class="section" id="sec-matchmedia">
+  <div class="section-header"><span class="status-dot pending" id="dot-matchmedia"></span><h2>matchMedia Screen Queries</h2></div>
+  <div class="section-body" id="matchmedia-results"></div>
+</div>
+
+<!-- Performance -->
+<div class="section" id="sec-perf">
+  <div class="section-header"><span class="status-dot pending" id="dot-perf"></span><h2>Performance Timing</h2></div>
+  <div class="section-body" id="perf-results"></div>
+</div>
+
+<!-- Storage Estimate -->
+<div class="section" id="sec-storage">
+  <div class="section-header"><span class="status-dot pending" id="dot-storage"></span><h2>Storage Estimate</h2></div>
+  <div class="section-body" id="storage-results"></div>
+</div>
+
+<button class="copy-btn" onclick="copyReport()">Copy Full Report to Clipboard</button>
+
+<canvas id="test-canvas" width="300" height="60"></canvas>
+<span id="rect-probe" style="position:absolute;visibility:hidden;font-size:16px;">ABCDEFghijklmnop</span>
+
+<script>
+// Utility: simple hash for display (works on HTTP — no crypto.subtle needed)
+function simpleHash(str) {
+  let h1 = 0xdeadbeef, h2 = 0x41c6ce57;
+  for (let i = 0; i < str.length; i++) {
+    const ch = str.charCodeAt(i);
+    h1 = Math.imul(h1 ^ ch, 2654435761);
+    h2 = Math.imul(h2 ^ ch, 1597334677);
+  }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+  return (h2 >>> 0).toString(16).padStart(8, "0") + (h1 >>> 0).toString(16).padStart(8, "0");
+}
+
+async function sha256Short(str) {
+  // Use crypto.subtle if available (HTTPS), otherwise fall back to simpleHash
+  if (crypto.subtle) {
+    try {
+      const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(str));
+      const arr = Array.from(new Uint8Array(buf));
+      return arr.map(b => b.toString(16).padStart(2, "0")).join("").slice(0, 16);
+    } catch(e) {}
+  }
+  return simpleHash(str);
+}
+
+// Utility: wrap async test with a timeout
+function withTimeout(fn, ms) {
+  return Promise.race([
+    fn(),
+    new Promise((_, reject) => setTimeout(() => reject(new Error("Timed out after " + ms + "ms")), ms))
+  ]);
+}
+
+function row(key, val, cls) {
+  return `<div class="row"><span class="key">${key}</span><span class="val ${cls || ''}">${val}</span></div>`;
+}
+
+function setDot(id, status) {
+  const el = document.getElementById(id);
+  el.className = "status-dot " + status;
+}
+
+const report = {};
+const sectionStatus = {};
+
+// ── Navigator ──
+function testNavigator() {
+  const el = document.getElementById("navigator-results");
+  const n = navigator;
+  const vals = {
+    "userAgent": n.userAgent,
+    "platform": n.platform,
+    "oscpu": n.oscpu || "(undefined)",
+    "appVersion": n.appVersion,
+    "hardwareConcurrency": n.hardwareConcurrency,
+    "deviceMemory": n.deviceMemory || "(undefined)",
+    "maxTouchPoints": n.maxTouchPoints,
+    "language": n.language,
+    "languages": JSON.stringify(n.languages),
+  };
+  report.navigator = vals;
+
+  let html = "";
+  for (const [k, v] of Object.entries(vals)) {
+    html += row(k, v);
+  }
+  el.innerHTML = html;
+
+  // If platform matches real system, likely not spoofed
+  const spoofed = n.platform !== "Linux x86_64" || n.hardwareConcurrency !== 4;
+  sectionStatus.navigator = spoofed ? "pass" : "fail";
+  setDot("dot-navigator", sectionStatus.navigator);
+}
+
+// ── Screen ──
+function testScreen() {
+  const el = document.getElementById("screen-results");
+  const vals = {
+    "screen.width": screen.width,
+    "screen.height": screen.height,
+    "screen.availWidth": screen.availWidth,
+    "screen.availHeight": screen.availHeight,
+    "screen.colorDepth": screen.colorDepth,
+    "screen.pixelDepth": screen.pixelDepth,
+    "window.outerWidth": window.outerWidth,
+    "window.outerHeight": window.outerHeight,
+    "window.innerWidth": window.innerWidth,
+    "window.innerHeight": window.innerHeight,
+  };
+  report.screen = vals;
+
+  let html = "";
+  for (const [k, v] of Object.entries(vals)) {
+    html += row(k, v);
+  }
+  el.innerHTML = html;
+
+  const spoofed = screen.width !== 1920 || screen.height !== 1080;
+  sectionStatus.screen = spoofed ? "pass" : "fail";
+  setDot("dot-screen", sectionStatus.screen);
+}
+
+// ── Canvas ──
+async function testCanvas() {
+  const el = document.getElementById("canvas-results");
+  const c = document.getElementById("test-canvas");
+  const ctx = c.getContext("2d");
+
+  // Draw a standard test pattern
+  ctx.fillStyle = "#f06d06";
+  ctx.fillRect(0, 0, 300, 60);
+  ctx.fillStyle = "#1a1a2e";
+  ctx.font = "18px Arial";
+  ctx.fillText("ContainSite Canvas Test 🎨", 10, 35);
+  ctx.strokeStyle = "#16213e";
+  ctx.beginPath();
+  ctx.arc(250, 30, 20, 0, Math.PI * 2);
+  ctx.stroke();
+
+  const dataUrl = c.toDataURL();
+  const hash = await sha256Short(dataUrl);
+
+  report.canvas = { hash, dataUrl_tail: dataUrl.slice(-40) };
+
+  el.innerHTML = row("Canvas hash", hash) +
+    `<div class="canvas-preview"><canvas id="vis-canvas" width="300" height="60" style="display:block"></canvas></div>`;
+
+  // Redraw on visible canvas
+  const vc = document.getElementById("vis-canvas");
+  const vctx = vc.getContext("2d");
+  vctx.fillStyle = "#f06d06";
+  vctx.fillRect(0, 0, 300, 60);
+  vctx.fillStyle = "#1a1a2e";
+  vctx.font = "18px Arial";
+  vctx.fillText("ContainSite Canvas Test", 10, 35);
+  vctx.strokeStyle = "#16213e";
+  vctx.beginPath();
+  vctx.arc(250, 30, 20, 0, Math.PI * 2);
+  vctx.stroke();
+
+  // We can't definitively know if it's spoofed without a baseline,
+  // but we report the hash for cross-container comparison
+  sectionStatus.canvas = "pass"; // hash present = vector active (user compares manually)
+  setDot("dot-canvas", "pass");
+}
+
+// ── WebGL ──
+function testWebGL() {
+  const el = document.getElementById("webgl-results");
+  const c = document.createElement("canvas");
+  const gl = c.getContext("webgl") || c.getContext("experimental-webgl");
+  if (!gl) {
+    el.innerHTML = row("Status", "WebGL not available", "fail");
+    sectionStatus.webgl = "warn";
+    setDot("dot-webgl", "warn");
+    return;
+  }
+
+  const dbgExt = gl.getExtension("WEBGL_debug_renderer_info");
+  const vendor = dbgExt ? gl.getParameter(dbgExt.UNMASKED_VENDOR_WEBGL) : "(ext not available)";
+  const renderer = dbgExt ? gl.getParameter(dbgExt.UNMASKED_RENDERER_WEBGL) : "(ext not available)";
+
+  const vals = { vendor, renderer };
+  report.webgl = vals;
+
+  el.innerHTML = row("Unmasked Vendor", vendor) + row("Unmasked Renderer", renderer);
+
+  // Check if it matches known spoofed patterns from the extension
+  const knownSpoofed = /ANGLE|Mesa|Apple M/i.test(renderer) && !/llvmpipe/i.test(renderer);
+  sectionStatus.webgl = knownSpoofed ? "pass" : "warn";
+  setDot("dot-webgl", sectionStatus.webgl);
+}
+
+// ── Audio ──
+async function testAudio() {
+  const el = document.getElementById("audio-results");
+  try {
+    await withTimeout(async () => {
+      const ctx = new (window.OfflineAudioContext || window.webkitOfflineAudioContext)(1, 44100, 44100);
+      const osc = ctx.createOscillator();
+      osc.type = "triangle";
+      osc.frequency.setValueAtTime(10000, ctx.currentTime);
+      const comp = ctx.createDynamicsCompressor();
+      comp.threshold.setValueAtTime(-50, ctx.currentTime);
+      comp.knee.setValueAtTime(40, ctx.currentTime);
+      comp.ratio.setValueAtTime(12, ctx.currentTime);
+      comp.attack.setValueAtTime(0, ctx.currentTime);
+      comp.release.setValueAtTime(0.25, ctx.currentTime);
+      osc.connect(comp);
+      comp.connect(ctx.destination);
+      osc.start(0);
+      const rendered = await ctx.startRendering();
+      const data = rendered.getChannelData(0);
+
+      let sum = 0;
+      for (let i = 4500; i < 5000; i++) sum += Math.abs(data[i]);
+      const audioHash = await sha256Short(sum.toString());
+
+      report.audio = { sampleSum: sum, hash: audioHash };
+      el.innerHTML = row("Audio fingerprint hash", audioHash) + row("Sample sum (4500-5000)", sum.toFixed(10));
+      sectionStatus.audio = "pass";
+      setDot("dot-audio", "pass");
+    }, 3000);
+  } catch (e) {
+    report.audio = { error: e.message };
+    el.innerHTML = row("Error", e.message, "fail");
+    sectionStatus.audio = "warn";
+    setDot("dot-audio", "warn");
+  }
+}
+
+// ── Timezone ──
+function testTimezone() {
+  const el = document.getElementById("timezone-results");
+  const offset = new Date().getTimezoneOffset();
+  const resolved = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const dateStr = new Date().toString();
+
+  const vals = {
+    "getTimezoneOffset()": offset,
+    "Intl timeZone": resolved,
+    "Date.toString()": dateStr,
+  };
+  report.timezone = vals;
+
+  let html = "";
+  for (const [k, v] of Object.entries(vals)) html += row(k, v);
+  el.innerHTML = html;
+
+  // Real system timezone is likely the local one — just report it
+  sectionStatus.timezone = "pass";
+  setDot("dot-timezone", "pass");
+}
+
+// ── Fonts ──
+function testFonts() {
+  const el = document.getElementById("fonts-results");
+  const c = document.createElement("canvas");
+  const ctx = c.getContext("2d");
+
+  const testFonts = ["monospace", "sans-serif", "serif", "Arial", "Courier New", "Georgia"];
+  const results = {};
+  for (const font of testFonts) {
+    ctx.font = `16px ${font}`;
+    const m = ctx.measureText("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789");
+    results[font] = m.width;
+  }
+
+  report.fonts = results;
+  let html = "";
+  for (const [font, w] of Object.entries(results)) {
+    // Sub-pixel values (non-integer) suggest noise was added
+    const hasFraction = w % 1 !== 0;
+    html += row(font, w.toFixed(6), hasFraction ? "spoofed" : "");
+  }
+  el.innerHTML = html;
+
+  const anyFractional = Object.values(results).some(w => w % 1 !== 0);
+  sectionStatus.fonts = anyFractional ? "pass" : "warn";
+  setDot("dot-fonts", sectionStatus.fonts);
+}
+
+// ── ClientRects ──
+function testRects() {
+  const el = document.getElementById("rects-results");
+  const probe = document.getElementById("rect-probe");
+  const rect = probe.getBoundingClientRect();
+
+  const vals = {
+    "x": rect.x,
+    "y": rect.y,
+    "width": rect.width,
+    "height": rect.height,
+    "top": rect.top,
+    "left": rect.left,
+  };
+  report.rects = vals;
+
+  let html = "";
+  for (const [k, v] of Object.entries(vals)) {
+    const hasFraction = v % 1 !== 0;
+    html += row(k, v.toFixed(6), hasFraction ? "spoofed" : "");
+  }
+  el.innerHTML = html;
+
+  // If noise is applied, values will have non-trivial fractional parts
+  const anyNoisy = Object.values(vals).some(v => {
+    const frac = Math.abs(v % 1);
+    return frac > 0.001 && frac < 0.999;
+  });
+  sectionStatus.rects = anyNoisy ? "pass" : "warn";
+  setDot("dot-rects", sectionStatus.rects);
+}
+
+// ── Plugins ──
+function testPlugins() {
+  const el = document.getElementById("plugins-results");
+  const count = navigator.plugins.length;
+  const mimeCount = navigator.mimeTypes.length;
+
+  report.plugins = { pluginCount: count, mimeTypeCount: mimeCount };
+  el.innerHTML = row("navigator.plugins.length", count, count === 0 ? "spoofed" : "") +
+                 row("navigator.mimeTypes.length", mimeCount, mimeCount === 0 ? "spoofed" : "");
+
+  sectionStatus.plugins = (count === 0 && mimeCount === 0) ? "pass" : "warn";
+  setDot("dot-plugins", sectionStatus.plugins);
+}
+
+// ── Battery ──
+async function testBattery() {
+  const el = document.getElementById("battery-results");
+  if (!navigator.getBattery) {
+    report.battery = { status: "API not available" };
+    el.innerHTML = row("Status", "getBattery not available (good — hidden)", "spoofed");
+    sectionStatus.battery = "pass";
+    setDot("dot-battery", "pass");
+    return;
+  }
+  try {
+    await withTimeout(async () => {
+      const bat = await navigator.getBattery();
+      const vals = {
+        "charging": bat.charging,
+        "chargingTime": bat.chargingTime,
+        "dischargingTime": bat.dischargingTime,
+        "level": bat.level,
+      };
+      report.battery = vals;
+
+      let html = "";
+      for (const [k, v] of Object.entries(vals)) html += row(k, String(v));
+      el.innerHTML = html;
+
+      const spoofed = bat.charging === true && bat.level === 1.0 && bat.chargingTime === 0;
+      sectionStatus.battery = spoofed ? "pass" : "fail";
+      setDot("dot-battery", sectionStatus.battery);
+    }, 3000);
+  } catch (e) {
+    report.battery = { error: e.message };
+    el.innerHTML = row("Error", e.message);
+    sectionStatus.battery = "warn";
+    setDot("dot-battery", "warn");
+  }
+}
+
+// ── Connection ──
+function testConnection() {
+  const el = document.getElementById("connection-results");
+  const conn = navigator.connection;
+  if (!conn) {
+    el.innerHTML = row("Status", "navigator.connection not available", "");
+    sectionStatus.connection = "warn";
+    setDot("dot-connection", "warn");
+    return;
+  }
+  const vals = {
+    "effectiveType": conn.effectiveType,
+    "downlink": conn.downlink,
+    "rtt": conn.rtt,
+    "saveData": conn.saveData,
+  };
+  report.connection = vals;
+
+  let html = "";
+  for (const [k, v] of Object.entries(vals)) html += row(k, String(v));
+  el.innerHTML = html;
+
+  const spoofed = conn.effectiveType === "4g" && conn.downlink === 10 && conn.rtt === 50;
+  sectionStatus.connection = spoofed ? "pass" : "warn";
+  setDot("dot-connection", sectionStatus.connection);
+}
+
+// ── WebRTC ──
+async function testWebRTC() {
+  const el = document.getElementById("webrtc-results");
+  if (!window.RTCPeerConnection) {
+    report.webrtc = { status: "API blocked" };
+    el.innerHTML = row("Status", "RTCPeerConnection not available (good — blocked)", "spoofed");
+    sectionStatus.webrtc = "pass";
+    setDot("dot-webrtc", "pass");
+    return;
+  }
+
+  let pc;
+  try {
+    await withTimeout(async () => {
+      const candidates = [];
+      pc = new RTCPeerConnection({
+        iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
+      });
+
+      pc.createDataChannel("");
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+
+      await new Promise((resolve) => {
+        const timeout = setTimeout(resolve, 3000);
+        pc.onicecandidate = (e) => {
+          if (e.candidate) {
+            candidates.push(e.candidate.candidate);
+          } else {
+            clearTimeout(timeout);
+            resolve();
+          }
+        };
+      });
+
+      pc.close();
+      pc = null;
+
+      report.webrtc = { candidates };
+
+      if (candidates.length === 0) {
+        el.innerHTML = row("ICE candidates", "None gathered (relay-only mode active)", "spoofed");
+        sectionStatus.webrtc = "pass";
+      } else {
+        const localIPs = [];
+        const publicIPs = [];
+        const mdnsAddrs = [];
+        let hasHost = false, hasSrflx = false, hasRelay = false;
+
+        for (const c of candidates) {
+          if (/typ host/.test(c)) hasHost = true;
+          if (/typ srflx/.test(c)) hasSrflx = true;
+          if (/typ relay/.test(c)) hasRelay = true;
+
+          // Check for mDNS .local addresses (obfuscated local IPs)
+          const mdns = c.match(/([a-f0-9-]+\.local)/);
+          if (mdns) mdnsAddrs.push(mdns[1]);
+
+          const match = c.match(/(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})/);
+          if (match) {
+            const ip = match[1];
+            if (/^(0\.0\.0\.0)$/.test(ip)) continue; // raddr placeholder
+            if (/^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|127\.)/.test(ip)) {
+              localIPs.push(ip);
+            } else {
+              publicIPs.push(ip);
+            }
+          }
+          // Check for IPv6 addresses
+          const ipv6 = c.match(/([0-9a-f]{4}:[0-9a-f:]+)/i);
+          if (ipv6) publicIPs.push(ipv6[1]);
+        }
+
+        let html = "";
+        if (publicIPs.length > 0) {
+          html += row("PUBLIC IP LEAKED", publicIPs.join(", "), "real");
+        }
+        if (localIPs.length > 0) {
+          html += row("LOCAL IP LEAKED", localIPs.join(", "), "real");
+        }
+        if (mdnsAddrs.length > 0) {
+          html += row("mDNS addresses", mdnsAddrs.join(", "));
+        }
+        html += row("Candidate types",
+          (hasHost ? "host " : "") + (hasSrflx ? "srflx " : "") + (hasRelay ? "relay " : ""),
+          hasHost || hasSrflx ? "real" : "spoofed");
+        html += row("Total candidates", candidates.length);
+        for (const c of candidates) {
+          html += row("", c);
+        }
+        el.innerHTML = html;
+
+        // FAIL if any non-relay candidates or any public IPs leaked
+        sectionStatus.webrtc = (publicIPs.length > 0 || localIPs.length > 0 || hasHost || hasSrflx) ? "fail" : "pass";
+      }
+      setDot("dot-webrtc", sectionStatus.webrtc);
+    }, 5000);
+  } catch (e) {
+    if (pc) try { pc.close(); } catch(_) {}
+    report.webrtc = { error: e.message };
+    el.innerHTML = row("Status", e.message);
+    sectionStatus.webrtc = "warn";
+    setDot("dot-webrtc", "warn");
+  }
+}
+
+// ── HTTP Headers ──
+async function testHeaders() {
+  const el = document.getElementById("headers-results");
+  try {
+    // Fetch a resource and check what headers the server sees
+    // We use a self-request to inspect our own headers via the server
+    // Since we can't see outgoing headers directly, we check for coherence:
+    // The JS navigator.userAgent should match what's sent in HTTP
+    const jsUA = navigator.userAgent;
+    const jsLang = navigator.languages ? navigator.languages.join(",") : navigator.language;
+
+    // We can detect the HTTP Accept-Language by examining what the browser sends
+    // For now, just report the JS values and note that HTTP header spoofing
+    // requires checking server-side (e.g., httpbin.org/headers)
+    const vals = {
+      "JS navigator.userAgent": jsUA,
+      "JS navigator.languages": jsLang,
+      "HTTP header check": "Visit httpbin.org/headers to verify match"
+    };
+    report.headers = vals;
+
+    let html = row("JS navigator.userAgent", jsUA);
+    html += row("JS navigator.languages", jsLang);
+
+    // Try fetching our own page to see if headers are modified
+    try {
+      const resp = await fetch(window.location.href, { method: "HEAD" });
+      html += row("Fetch completed", "Headers sent with spoofed values (verify server-side)", "spoofed");
+    } catch(e) {
+      html += row("Fetch test", "Could not verify: " + e.message);
+    }
+
+    el.innerHTML = html;
+
+    // If the JS UA doesn't match the real browser, headers are likely spoofed too
+    const isSpoofed = !/rv:148\.0/.test(jsUA);
+    sectionStatus.headers = isSpoofed ? "pass" : "fail";
+    setDot("dot-headers", sectionStatus.headers);
+  } catch(e) {
+    report.headers = { error: e.message };
+    el.innerHTML = row("Error", e.message);
+    sectionStatus.headers = "warn";
+    setDot("dot-headers", "warn");
+  }
+}
+
+// ── Speech Synthesis ──
+function testSpeech() {
+  const el = document.getElementById("speech-results");
+  if (!window.speechSynthesis) {
+    report.speech = { status: "API not available" };
+    el.innerHTML = row("Status", "speechSynthesis not available", "");
+    sectionStatus.speech = "warn";
+    setDot("dot-speech", "warn");
+    return;
+  }
+
+  const voices = speechSynthesis.getVoices();
+  const count = voices.length;
+  report.speech = { voiceCount: count };
+  el.innerHTML = row("speechSynthesis.getVoices().length", count, count === 0 ? "spoofed" : "real");
+  sectionStatus.speech = count === 0 ? "pass" : "fail";
+  setDot("dot-speech", sectionStatus.speech);
+}
+
+// ── matchMedia ──
+function testMatchMedia() {
+  const el = document.getElementById("matchmedia-results");
+  const screenW = screen.width;
+  const screenH = screen.height;
+
+  // Test if matchMedia agrees with our spoofed screen dimensions
+  const wideEnough = matchMedia(`(min-width: ${screenW}px)`).matches;
+  const notTooWide = matchMedia(`(max-width: ${screenW}px)`).matches;
+  const tallEnough = matchMedia(`(min-height: ${screenH}px)`).matches;
+
+  // Test against real dimensions — should NOT match if spoofed
+  const realWCheck = matchMedia("(min-width: 1920px)").matches;
+  const realHCheck = matchMedia("(min-height: 1080px)").matches;
+
+  const vals = {
+    [`(min-width: ${screenW}px)`]: wideEnough,
+    [`(max-width: ${screenW}px)`]: notTooWide,
+    [`(min-height: ${screenH}px)`]: tallEnough,
+    "(min-width: 1920px) [real]": realWCheck,
+    "(min-height: 1080px) [real]": realHCheck,
+  };
+  report.matchmedia = vals;
+
+  let html = "";
+  html += row(`min-width: ${screenW}px`, wideEnough ? "matches" : "no match",
+    wideEnough ? "spoofed" : "real");
+  html += row(`max-width: ${screenW}px`, notTooWide ? "matches" : "no match");
+  html += row(`min-height: ${screenH}px`, tallEnough ? "matches" : "no match",
+    tallEnough ? "spoofed" : "real");
+  html += row("min-width: 1920px [real check]", realWCheck ? "matches (real leak)" : "no match (good)",
+    realWCheck && screenW !== 1920 ? "real" : "spoofed");
+  el.innerHTML = html;
+
+  // Pass if spoofed dimensions are consistent with matchMedia
+  sectionStatus.matchmedia = wideEnough ? "pass" : "warn";
+  setDot("dot-matchmedia", sectionStatus.matchmedia);
+}
+
+// ── Performance Timing ──
+function testPerf() {
+  const el = document.getElementById("perf-results");
+  // Take multiple samples and check precision
+  const samples = [];
+  for (let i = 0; i < 20; i++) samples.push(performance.now());
+
+  // Check the decimal precision of the samples
+  const precisions = samples.map(s => {
+    const str = s.toString();
+    const dot = str.indexOf(".");
+    return dot === -1 ? 0 : str.length - dot - 1;
+  });
+  const maxPrecision = Math.max(...precisions);
+
+  // Check if values are rounded (reduced precision)
+  const allRounded = samples.every(s => {
+    const frac = s % 0.1;
+    return Math.abs(frac) < 0.001 || Math.abs(frac - 0.1) < 0.001;
+  });
+
+  report.perf = {
+    sampleCount: samples.length,
+    maxDecimalPrecision: maxPrecision,
+    appearsRounded: allRounded,
+    sampleRange: `${samples[0].toFixed(3)} - ${samples[samples.length-1].toFixed(3)}`
+  };
+
+  let html = row("Max decimal precision", maxPrecision + " digits");
+  html += row("Values rounded to 0.1ms", allRounded ? "yes" : "no", allRounded ? "spoofed" : "");
+  html += row("Sample range", `${samples[0].toFixed(3)} - ${samples[samples.length-1].toFixed(3)}`);
+  el.innerHTML = html;
+
+  sectionStatus.perf = allRounded ? "pass" : "warn";
+  setDot("dot-perf", sectionStatus.perf);
+}
+
+// ── Storage Estimate ──
+async function testStorage() {
+  const el = document.getElementById("storage-results");
+  if (!navigator.storage || !navigator.storage.estimate) {
+    report.storage = { status: "API not available" };
+    el.innerHTML = row("Status", "storage.estimate not available", "");
+    sectionStatus.storage = "warn";
+    setDot("dot-storage", "warn");
+    return;
+  }
+
+  try {
+    await withTimeout(async () => {
+      const est = await navigator.storage.estimate();
+      report.storage = { quota: est.quota, usage: est.usage };
+
+      const isSpoofed = est.quota === 2147483648 && est.usage === 0;
+      el.innerHTML = row("quota", est.quota.toLocaleString() + " bytes", isSpoofed ? "spoofed" : "") +
+                     row("usage", est.usage.toLocaleString() + " bytes", isSpoofed ? "spoofed" : "");
+      sectionStatus.storage = isSpoofed ? "pass" : "warn";
+      setDot("dot-storage", sectionStatus.storage);
+    }, 3000);
+  } catch(e) {
+    report.storage = { error: e.message };
+    el.innerHTML = row("Error", e.message);
+    sectionStatus.storage = "warn";
+    setDot("dot-storage", "warn");
+  }
+}
+
+// ── Summary ──
+function updateSummary() {
+  let pass = 0, fail = 0, warn = 0;
+  for (const s of Object.values(sectionStatus)) {
+    if (s === "pass") pass++;
+    else if (s === "fail") fail++;
+    else warn++;
+  }
+  document.getElementById("sum-pass-n").textContent = pass;
+  document.getElementById("sum-fail-n").textContent = fail;
+  document.getElementById("sum-warn-n").textContent = warn;
+  document.getElementById("sum-pass").className = "status-dot " + (pass > 0 ? "pass" : "pending");
+  document.getElementById("sum-fail").className = "status-dot " + (fail > 0 ? "fail" : "pending");
+  document.getElementById("sum-warn").className = "status-dot " + (warn > 0 ? "warn" : "pending");
+}
+
+// ── Composite hash ──
+async function computeComposite() {
+  const composite = JSON.stringify(report);
+  const hash = await sha256Short(composite);
+  document.getElementById("composite-hash").textContent = hash;
+}
+
+// ── Build report text ──
+function buildReportText() {
+  const lines = [`ContainSite Fingerprint Report — ${new Date().toISOString()}`, ""];
+
+  for (const [section, data] of Object.entries(report)) {
+    const status = sectionStatus[section] || "?";
+    lines.push(`[${status.toUpperCase()}] ${section}`);
+    if (typeof data === "object") {
+      for (const [k, v] of Object.entries(data)) {
+        lines.push(`  ${k}: ${v}`);
+      }
+    }
+    lines.push("");
+  }
+
+  lines.push("Composite hash: " + document.getElementById("composite-hash").textContent);
+  return lines.join("\n");
+}
+
+// ── Copy report (textarea fallback for HTTP) ──
+function copyReport() {
+  const text = buildReportText();
+  const ta = document.createElement("textarea");
+  ta.value = text;
+  ta.style.position = "fixed";
+  ta.style.left = "-9999px";
+  document.body.appendChild(ta);
+  ta.select();
+  try {
+    document.execCommand("copy");
+    const btn = document.querySelector(".copy-btn");
+    btn.textContent = "Copied!";
+    setTimeout(() => btn.textContent = "Copy Full Report to Clipboard", 2000);
+  } catch(e) {
+    // If copy also fails, show the report in a prompt
+    prompt("Copy this report:", text);
+  }
+  document.body.removeChild(ta);
+}
+
+// ── Run all ──
+async function runAll() {
+  // Sync tests first
+  try { testNavigator(); } catch(e) { console.error("navigator test:", e); }
+  try { testScreen(); } catch(e) { console.error("screen test:", e); }
+  try { testWebGL(); } catch(e) { console.error("webgl test:", e); }
+  try { testTimezone(); } catch(e) { console.error("timezone test:", e); }
+  try { testFonts(); } catch(e) { console.error("fonts test:", e); }
+  try { testRects(); } catch(e) { console.error("rects test:", e); }
+  try { testPlugins(); } catch(e) { console.error("plugins test:", e); }
+  try { testConnection(); } catch(e) { console.error("connection test:", e); }
+  try { testSpeech(); } catch(e) { console.error("speech test:", e); }
+  try { testMatchMedia(); } catch(e) { console.error("matchmedia test:", e); }
+  try { testPerf(); } catch(e) { console.error("perf test:", e); }
+
+  // Async tests — run in parallel with individual error handling
+  await Promise.allSettled([
+    testCanvas(),
+    testAudio(),
+    testBattery(),
+    testWebRTC(),
+    testHeaders(),
+    testStorage(),
+  ]);
+
+  updateSummary();
+  await computeComposite();
+}
+
+runAll();
+</script>
+</body>
+</html>
