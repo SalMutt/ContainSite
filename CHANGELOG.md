@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.2
+
+- Fixed Discord crash caused by Intl.DateTimeFormat cross-compartment constructor failure
+- Fixed Connection API override missing addEventListener (could crash real-time apps)
+
 ## 0.5.1
 
 - Fixed Discord and other complex web apps crashing due to DOM dimension noise

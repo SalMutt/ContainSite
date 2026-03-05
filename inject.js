@@ -247,8 +247,12 @@
             effectiveType: "4g",
             downlink: 10,
             rtt: 50,
-            saveData: false
-          }, pageWindow);
+            saveData: false,
+            addEventListener: function() {},
+            removeEventListener: function() {},
+            dispatchEvent: function() { return true; },
+            onchange: null
+          }, pageWindow, { cloneFunctions: true });
         }, pageWindow),
         configurable: true,
         enumerable: true
@@ -330,10 +334,11 @@
 
     const OrigDateTimeFormat = window.Intl.DateTimeFormat;
 
-    // Wrap the Intl.DateTimeFormat constructor to inject spoofed timezone
-    // when no explicit timeZone is provided. This ensures resolvedOptions()
-    // returns the spoofed timezone and all formatting uses it.
-    const wrappedDTF = exportFunction(function(locales, options) {
+    // Wrap the Intl.DateTimeFormat constructor to inject spoofed timezone.
+    // The wrapper creates the real instance in the content script scope
+    // (where OrigDateTimeFormat is a valid constructor) then returns it.
+    // Using a helper avoids cross-compartment constructor failures.
+    function createDateTimeFormat(locales, options) {
       let opts;
       if (options) {
         try { opts = JSON.parse(JSON.stringify(options)); } catch(e) { opts = {}; }
@@ -341,8 +346,11 @@
         opts = {};
       }
       if (!opts.timeZone) opts.timeZone = tzName;
-      // Support both `new Intl.DateTimeFormat()` and `Intl.DateTimeFormat()`
       return new OrigDateTimeFormat(locales, opts);
+    }
+
+    const wrappedDTF = exportFunction(function(locales, options) {
+      return createDateTimeFormat(locales, options);
     }, pageWindow);
 
     try {
