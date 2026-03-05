@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.5.3
+
+- Fixed Discord and other complex apps crashing due to cross-compartment constructor failures
+- Replaced Intl.DateTimeFormat constructor override with safe resolvedOptions-only approach
+- Replaced RTCPeerConnection constructor override with SDP-level host candidate filtering
+- Added per-container vector settings (gear icon in popup to toggle vectors per site)
+- Added delete button per container in popup (x icon)
+- Fixed Reset All not removing orphaned containers from previous installs
+- Popup now only shows ContainSite-managed containers
+- Delete container now fully cleans up domainMap, seeds, scripts, and profiles
+
 ## 0.5.2
 
 - Fixed Discord crash caused by Intl.DateTimeFormat cross-compartment constructor failure

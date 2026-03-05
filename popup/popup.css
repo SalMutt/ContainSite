@@ -19,6 +19,8 @@ h1 { padding: 10px 12px 6px; font-size: 15px; font-weight: 600; border-bottom: 1
 .toggle:checked::after { left: 16px; background: #fff; }
 .regen { background: none; border: 1px solid #555; color: #aaa; border-radius: 4px; padding: 2px 6px; font-size: 11px; cursor: pointer; flex-shrink: 0; }
 .regen:hover { border-color: #888; color: #ddd; }
+.del { background: none; border: none; color: #664444; font-size: 15px; cursor: pointer; flex-shrink: 0; padding: 0 2px; line-height: 1; }
+.del:hover { color: #ff613d; }
 .actions { padding: 8px 12px; border-top: 1px solid #333; }
 #regen-all { width: 100%; padding: 6px; background: #333; border: 1px solid #555; color: #ccc; border-radius: 4px; cursor: pointer; font-size: 12px; }
 #regen-all:hover { background: #444; color: #fff; }
@@ -28,6 +30,18 @@ h1 { padding: 10px 12px 6px; font-size: 15px; font-weight: 600; border-bottom: 1
 .secondary:hover { background: #333; color: #ddd; }
 .danger { background: #3a1a1a; border: 1px solid #663333; color: #ff613d; }
 .danger:hover { background: #4a2020; color: #ff8866; }
+
+.gear { background: none; border: none; color: #666; font-size: 15px; cursor: pointer; flex-shrink: 0; padding: 0 2px; line-height: 1; }
+.gear:hover, .gear.active { color: #4a9eff; }
+.vector-panel { background: #252535; border-bottom: 1px solid #333; padding: 6px 12px 6px 30px; }
+.vector-row { display: flex; align-items: center; gap: 6px; padding: 2px 0; }
+.vector-label { flex: 1; font-size: 11px; color: #aaa; }
+.toggle-sm { width: 26px !important; height: 14px !important; }
+.toggle-sm::after { width: 10px !important; height: 10px !important; }
+.toggle-sm:checked::after { left: 12px !important; }
+.toggle.inherited { opacity: 0.5; }
+.vector-reset { background: none; border: none; color: #666; font-size: 12px; cursor: pointer; padding: 0 2px; visibility: visible; }
+.vector-reset:hover { color: #4a9eff; }
 
 .dot-blue { background: #37adff; }
 .dot-turquoise { background: #00c79a; }

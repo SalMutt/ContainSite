@@ -85,8 +85,16 @@ async function registerForContainer(cookieStoreId, profile) {
 
 async function buildProfileAndRegister(cookieStoreId, seed) {
   const profile = generateFingerprintProfile(seed);
-  const vsStored = await browser.storage.local.get("vectorSettings");
-  profile.vectors = vsStored.vectorSettings || {};
+  const stored = await browser.storage.local.get(["vectorSettings", "containerSettings"]);
+  const globalVectors = stored.vectorSettings || {};
+  const containerSettings = stored.containerSettings || {};
+  const containerVectors = containerSettings[cookieStoreId]?.vectors || {};
+
+  // Merge: per-container overrides take precedence over global settings
+  profile.vectors = { ...globalVectors };
+  for (const [key, val] of Object.entries(containerVectors)) {
+    if (val !== null) profile.vectors[key] = val;
+  }
 
   // Cache profile for HTTP header spoofing
   containerProfiles[cookieStoreId] = {
@@ -278,6 +286,8 @@ browser.runtime.onMessage.addListener((message, sender) => {
   if (message.type === "importSettings") return handleImportSettings(message.data);
   if (message.type === "getAutoPruneSettings") return handleGetAutoPruneSettings();
   if (message.type === "setAutoPruneSettings") return handleSetAutoPruneSettings(message.settings);
+  if (message.type === "getContainerVectors") return handleGetContainerVectors(message.cookieStoreId);
+  if (message.type === "setContainerVectors") return handleSetContainerVectors(message.cookieStoreId, message.vectors);
 });
 
 async function handleGetContainerList() {
@@ -291,15 +301,23 @@ async function handleGetContainerList() {
     reverseDomainMap[cid] = domain;
   }
 
-  return containers.map(c => ({
-    name: c.name,
-    cookieStoreId: c.cookieStoreId,
-    color: c.color,
-    icon: c.icon,
-    domain: reverseDomainMap[c.cookieStoreId] || null,
-    enabled: (settings[c.cookieStoreId]?.enabled !== false),
-    hasSeed: !!seeds[c.cookieStoreId]
-  }));
+  // Only show containers we manage (in domainMap or have a seed)
+  const ourContainerIds = new Set([
+    ...Object.values(domainMap),
+    ...Object.keys(seeds)
+  ]);
+
+  return containers
+    .filter(c => ourContainerIds.has(c.cookieStoreId))
+    .map(c => ({
+      name: c.name,
+      cookieStoreId: c.cookieStoreId,
+      color: c.color,
+      icon: c.icon,
+      domain: reverseDomainMap[c.cookieStoreId] || null,
+      enabled: (settings[c.cookieStoreId]?.enabled !== false),
+      hasSeed: !!seeds[c.cookieStoreId]
+    }));
 }
 
 async function handleToggle(cookieStoreId, enabled) {
@@ -359,11 +377,21 @@ async function handleResetAll() {
     delete registeredScripts[key];
   }
 
-  // Remove all ContainSite-managed containers
+  // Collect all container IDs we know about (domainMap + seeds)
+  const stored = await browser.storage.local.get("containerSeeds");
+  const seeds = stored.containerSeeds || {};
+  const ourContainerIds = new Set([
+    ...Object.values(domainMap),
+    ...Object.keys(seeds),
+    ...managedContainerIds
+  ]);
+
+  // Remove all containers that are ours OR look like domain-named containers
+  // (catches orphans from previous installs/reloads)
   const containers = await browser.contextualIdentities.query({});
-  const ourContainerIds = new Set(Object.values(domainMap));
+  const domainPattern = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/;
   for (const c of containers) {
-    if (ourContainerIds.has(c.cookieStoreId)) {
+    if (ourContainerIds.has(c.cookieStoreId) || domainPattern.test(c.name)) {
       try { await browser.contextualIdentities.remove(c.cookieStoreId); } catch(e) {}
     }
   }
@@ -402,15 +430,34 @@ async function handlePruneContainers() {
 }
 
 async function handleDeleteContainer(cookieStoreId) {
+  // Unregister content script
+  if (registeredScripts[cookieStoreId]) {
+    try { await registeredScripts[cookieStoreId].unregister(); } catch(e) {}
+    delete registeredScripts[cookieStoreId];
+  }
+
   try {
     await browser.contextualIdentities.remove(cookieStoreId);
   } catch(e) {}
+
+  // Clean up domainMap
+  for (const [domain, cid] of Object.entries(domainMap)) {
+    if (cid === cookieStoreId) {
+      delete domainMap[domain];
+    }
+  }
+  await saveDomainMap();
+
+  managedContainerIds.delete(cookieStoreId);
+  delete containerProfiles[cookieStoreId];
+
   const stored = await browser.storage.local.get(["containerSeeds", "containerSettings"]);
   const seeds = stored.containerSeeds || {};
   const settings = stored.containerSettings || {};
   delete seeds[cookieStoreId];
   delete settings[cookieStoreId];
   await browser.storage.local.set({ containerSeeds: seeds, containerSettings: settings });
+  await updateBadge();
   return { ok: true };
 }
 
@@ -480,6 +527,28 @@ async function handleGetAutoPruneSettings() {
 
 async function handleSetAutoPruneSettings(settings) {
   await browser.storage.local.set({ autoPrune: settings });
+  return { ok: true };
+}
+
+async function handleGetContainerVectors(cookieStoreId) {
+  const stored = await browser.storage.local.get(["vectorSettings", "containerSettings"]);
+  const globalVectors = stored.vectorSettings || {};
+  const containerSettings = stored.containerSettings || {};
+  const containerVectors = containerSettings[cookieStoreId]?.vectors || {};
+  return { global: globalVectors, overrides: containerVectors };
+}
+
+async function handleSetContainerVectors(cookieStoreId, vectors) {
+  const stored = await browser.storage.local.get(["containerSettings", "containerSeeds"]);
+  const settings = stored.containerSettings || {};
+  settings[cookieStoreId] = { ...settings[cookieStoreId], vectors };
+  await browser.storage.local.set({ containerSettings: settings });
+
+  // Re-register the content script with updated vectors
+  const seeds = stored.containerSeeds || {};
+  if (seeds[cookieStoreId] && settings[cookieStoreId]?.enabled !== false) {
+    await buildProfileAndRegister(cookieStoreId, seeds[cookieStoreId]);
+  }
   return { ok: true };
 }
 

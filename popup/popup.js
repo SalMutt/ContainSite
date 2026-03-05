@@ -1,3 +1,18 @@
+const VECTORS = {
+  canvas:      "Canvas",
+  webgl:       "WebGL",
+  audio:       "Audio",
+  navigator:   "Navigator",
+  screen:      "Screen",
+  timezone:    "Timezone",
+  webrtc:      "WebRTC",
+  fonts:       "Fonts",
+  clientRects: "Client Rects",
+  plugins:     "Plugins",
+  battery:     "Battery",
+  connection:  "Connection"
+};
+
 async function loadContainers() {
   const containers = await browser.runtime.sendMessage({ type: "getContainerList" });
   const list = document.getElementById("container-list");
@@ -38,6 +53,13 @@ async function loadContainers() {
     });
     row.appendChild(toggle);
 
+    const gear = document.createElement("button");
+    gear.className = "gear";
+    gear.textContent = "\u2699";
+    gear.title = "Vector settings";
+    gear.addEventListener("click", () => toggleSettings(c.cookieStoreId, row, gear));
+    row.appendChild(gear);
+
     const regen = document.createElement("button");
     regen.className = "regen";
     regen.textContent = "New";
@@ -53,8 +75,96 @@ async function loadContainers() {
     });
     row.appendChild(regen);
 
+    const del = document.createElement("button");
+    del.className = "del";
+    del.textContent = "\u00D7";
+    del.title = "Delete container";
+    del.addEventListener("click", async () => {
+      if (!confirm(`Delete container "${c.name}"? This removes all cookies and data for this site.`)) return;
+      await browser.runtime.sendMessage({
+        type: "deleteContainer",
+        cookieStoreId: c.cookieStoreId
+      });
+      const panel = row.nextElementSibling;
+      if (panel && panel.classList.contains("vector-panel")) panel.remove();
+      row.remove();
+    });
+    row.appendChild(del);
+
     list.appendChild(row);
   }
+}
+
+async function toggleSettings(cookieStoreId, row, gearBtn) {
+  const existing = row.nextElementSibling;
+  if (existing && existing.classList.contains("vector-panel")) {
+    existing.remove();
+    gearBtn.classList.remove("active");
+    return;
+  }
+
+  gearBtn.classList.add("active");
+
+  const panel = document.createElement("div");
+  panel.className = "vector-panel";
+
+  const { global, overrides } = await browser.runtime.sendMessage({
+    type: "getContainerVectors",
+    cookieStoreId
+  });
+
+  for (const [key, label] of Object.entries(VECTORS)) {
+    const item = document.createElement("div");
+    item.className = "vector-row";
+
+    const span = document.createElement("span");
+    span.className = "vector-label";
+    span.textContent = label;
+    item.appendChild(span);
+
+    const hasOverride = overrides[key] !== undefined && overrides[key] !== null;
+    const globalEnabled = global[key] !== false;
+    const effectiveValue = hasOverride ? overrides[key] : globalEnabled;
+
+    const toggle = document.createElement("input");
+    toggle.type = "checkbox";
+    toggle.className = "toggle toggle-sm";
+    toggle.checked = effectiveValue;
+    if (!hasOverride) toggle.classList.add("inherited");
+
+    toggle.addEventListener("change", async () => {
+      overrides[key] = toggle.checked;
+      toggle.classList.remove("inherited");
+      await browser.runtime.sendMessage({
+        type: "setContainerVectors",
+        cookieStoreId,
+        vectors: overrides
+      });
+    });
+    item.appendChild(toggle);
+
+    const resetBtn = document.createElement("button");
+    resetBtn.className = "vector-reset";
+    resetBtn.textContent = "\u21A9";
+    resetBtn.title = "Reset to global default";
+    if (!hasOverride) resetBtn.style.visibility = "hidden";
+    resetBtn.addEventListener("click", async () => {
+      delete overrides[key];
+      toggle.checked = globalEnabled;
+      toggle.classList.add("inherited");
+      resetBtn.style.visibility = "hidden";
+      await browser.runtime.sendMessage({
+        type: "setContainerVectors",
+        cookieStoreId,
+        vectors: overrides
+      });
+    });
+    item.appendChild(resetBtn);
+
+    panel.appendChild(item);
+  }
+
+  row.after(panel);
 }
 
 document.getElementById("regen-all").addEventListener("click", async (e) => {

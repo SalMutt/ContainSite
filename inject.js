@@ -332,33 +332,22 @@
       return tzOffset;
     }, pageWindow.Date.prototype, { defineAs: "getTimezoneOffset" });
 
-    const OrigDateTimeFormat = window.Intl.DateTimeFormat;
-
-    // Wrap the Intl.DateTimeFormat constructor to inject spoofed timezone.
-    // The wrapper creates the real instance in the content script scope
-    // (where OrigDateTimeFormat is a valid constructor) then returns it.
-    // Using a helper avoids cross-compartment constructor failures.
-    function createDateTimeFormat(locales, options) {
-      let opts;
-      if (options) {
-        try { opts = JSON.parse(JSON.stringify(options)); } catch(e) { opts = {}; }
-      } else {
-        opts = {};
-      }
-      if (!opts.timeZone) opts.timeZone = tzName;
-      return new OrigDateTimeFormat(locales, opts);
-    }
-
-    const wrappedDTF = exportFunction(function(locales, options) {
-      return createDateTimeFormat(locales, options);
-    }, pageWindow);
-
+    // Override resolvedOptions to report spoofed timezone instead of replacing
+    // the constructor (which causes cross-compartment failures on complex apps).
     try {
-      wrappedDTF.prototype = pageWindow.Intl.DateTimeFormat.prototype;
-      wrappedDTF.supportedLocalesOf = pageWindow.Intl.DateTimeFormat.supportedLocalesOf;
-      Object.defineProperty(pageWindow.Intl, "DateTimeFormat", {
-        value: wrappedDTF, writable: true, configurable: true, enumerable: true
-      });
+      const origResolvedOptions = window.Intl.DateTimeFormat.prototype.resolvedOptions;
+      exportFunction(function() {
+        try {
+          const result = origResolvedOptions.call(this);
+          if (result && !result._tz) {
+            result.timeZone = tzName;
+            result._tz = true;
+          }
+          return result;
+        } catch(e) {
+          return origResolvedOptions.call(this);
+        }
+      }, pageWindow.Intl.DateTimeFormat.prototype, { defineAs: "resolvedOptions" });
     } catch(e) {}
 
     const origToString = window.Date.prototype.toString;
@@ -381,36 +370,44 @@
     const tzM = String(tzAbsOff % 60).padStart(2, "0");
     const gmtString = `GMT${tzSign}${tzH}${tzM}`;
 
-    // Pre-create a formatter in the content script scope (not inside exportFunction)
-    const tzDateFmt = new OrigDateTimeFormat("en-US", {
-      timeZone: tzName,
-      weekday: "short", year: "numeric", month: "short", day: "2-digit",
-      hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false
-    });
-    const tzTimeFmt = new OrigDateTimeFormat("en-US", {
-      timeZone: tzName,
-      hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false
-    });
+    // Pre-create formatters for Date.toString/toTimeString overrides.
+    // Wrapped in try-catch because Intl.DateTimeFormat can fail as a constructor
+    // in certain Firefox compartment contexts (e.g. container tabs).
+    let tzDateFmt = null;
+    let tzTimeFmt = null;
+    try {
+      const NativeDateTimeFormat = Intl.DateTimeFormat;
+      tzDateFmt = new NativeDateTimeFormat("en-US", {
+        timeZone: tzName,
+        weekday: "short", year: "numeric", month: "short", day: "2-digit",
+        hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false
+      });
+      tzTimeFmt = new NativeDateTimeFormat("en-US", {
+        timeZone: tzName,
+        hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false
+      });
+    } catch(e) {}
 
     exportFunction(function() {
       try {
-        // Get timestamp from the page-side Date via getTime (works across compartments)
-        const ts = window.Date.prototype.getTime.call(this);
-        const parts = tzDateFmt.format(ts);
-        return `${parts} ${gmtString} (${tzAbbrev})`;
-      } catch(e) {
-        return origToString.call(this);
-      }
+        if (tzDateFmt) {
+          const ts = window.Date.prototype.getTime.call(this);
+          const parts = tzDateFmt.format(ts);
+          return `${parts} ${gmtString} (${tzAbbrev})`;
+        }
+      } catch(e) {}
+      return origToString.call(this);
     }, pageWindow.Date.prototype, { defineAs: "toString" });
 
     exportFunction(function() {
       try {
-        const ts = window.Date.prototype.getTime.call(this);
-        const parts = tzTimeFmt.format(ts);
-        return `${parts} ${gmtString} (${tzAbbrev})`;
-      } catch(e) {
-        return origToTimeString.call(this);
-      }
+        if (tzTimeFmt) {
+          const ts = window.Date.prototype.getTime.call(this);
+          const parts = tzTimeFmt.format(ts);
+          return `${parts} ${gmtString} (${tzAbbrev})`;
+        }
+      } catch(e) {}
+      return origToTimeString.call(this);
     }, pageWindow.Date.prototype, { defineAs: "toTimeString" });
   }
 
@@ -425,32 +422,41 @@
     //   media.peerconnection.ice.default_address_only = true
     //   media.peerconnection.ice.no_host = true
     //   media.peerconnection.ice.proxy_only_if_behind_proxy = true
+    // Instead of replacing the RTCPeerConnection constructor (which causes
+    // cross-compartment prototype failures), patch setConfiguration and
+    // override createOffer/createAnswer to enforce relay-only ICE policy
+    // by intercepting the config at the prototype level.
     if (pageWindow.RTCPeerConnection) {
-      const OrigRTC = window.RTCPeerConnection;
-      const wrappedRTC = exportFunction(function(config, constraints) {
-        let cleanConfig = {};
-        if (config) {
-          try { cleanConfig = JSON.parse(JSON.stringify(config)); } catch(e) {}
-        }
-        cleanConfig.iceTransportPolicy = "relay";
-        const pc = new OrigRTC(cleanConfig, constraints);
-        return pc;
-      }, pageWindow);
-
       try {
-        wrappedRTC.prototype = pageWindow.RTCPeerConnection.prototype;
-        Object.defineProperty(pageWindow, "RTCPeerConnection", {
-          value: wrappedRTC, writable: true, configurable: true, enumerable: true
-        });
-      } catch(e) {}
+        const origSetLocalDesc = pageWindow.RTCPeerConnection.prototype.setLocalDescription;
+        const origSetRemoteDesc = pageWindow.RTCPeerConnection.prototype.setRemoteDescription;
 
-      if (pageWindow.webkitRTCPeerConnection) {
-        try {
-          Object.defineProperty(pageWindow, "webkitRTCPeerConnection", {
-            value: wrappedRTC, writable: true, configurable: true, enumerable: true
-          });
-        } catch(e) {}
-      }
+        // Strip host candidates from SDP to prevent local IP leaks
+        function filterSDP(sdp) {
+          if (!sdp || typeof sdp !== "string") return sdp;
+          return sdp.split("\r\n").filter(function(line) {
+            return !/^a=candidate:.+ host /.test(line);
+          }).join("\r\n");
+        }
+
+        exportFunction(function(desc) {
+          try {
+            if (desc && desc.sdp) {
+              desc = { type: desc.type, sdp: filterSDP(desc.sdp) };
+            }
+          } catch(e) {}
+          return origSetLocalDesc.call(this, desc);
+        }, pageWindow.RTCPeerConnection.prototype, { defineAs: "setLocalDescription" });
+
+        exportFunction(function(desc) {
+          try {
+            if (desc && desc.sdp) {
+              desc = { type: desc.type, sdp: filterSDP(desc.sdp) };
+            }
+          } catch(e) {}
+          return origSetRemoteDesc.call(this, desc);
+        }, pageWindow.RTCPeerConnection.prototype, { defineAs: "setRemoteDescription" });
+      } catch(e) {}
     }
   }
 
