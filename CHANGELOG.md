@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.5.4
+
+- Replaced system confirm dialogs with inline confirmation bars in popup
+
 ## 0.5.3
 
 - Fixed Discord and other complex apps crashing due to cross-compartment constructor failures
