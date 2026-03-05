@@ -79,15 +79,43 @@ async function loadContainers() {
     del.className = "del";
     del.textContent = "\u00D7";
     del.title = "Delete container";
-    del.addEventListener("click", async () => {
-      if (!confirm(`Delete container "${c.name}"? This removes all cookies and data for this site.`)) return;
-      await browser.runtime.sendMessage({
-        type: "deleteContainer",
-        cookieStoreId: c.cookieStoreId
+    del.addEventListener("click", () => {
+      // Show inline confirmation
+      const existing = row.nextElementSibling;
+      if (existing && existing.classList.contains("confirm-bar")) {
+        existing.remove();
+        return;
+      }
+      // Remove any open panels
+      if (existing && existing.classList.contains("vector-panel")) existing.remove();
+
+      const bar = document.createElement("div");
+      bar.className = "confirm-bar";
+      const msg = document.createElement("span");
+      msg.className = "confirm-msg";
+      msg.textContent = `Delete "${c.name}"?`;
+      bar.appendChild(msg);
+
+      const yes = document.createElement("button");
+      yes.className = "confirm-yes";
+      yes.textContent = "Delete";
+      yes.addEventListener("click", async () => {
+        await browser.runtime.sendMessage({
+          type: "deleteContainer",
+          cookieStoreId: c.cookieStoreId
+        });
+        bar.remove();
+        row.remove();
       });
-      const panel = row.nextElementSibling;
-      if (panel && panel.classList.contains("vector-panel")) panel.remove();
-      row.remove();
+      bar.appendChild(yes);
+
+      const no = document.createElement("button");
+      no.className = "confirm-no";
+      no.textContent = "Cancel";
+      no.addEventListener("click", () => bar.remove());
+      bar.appendChild(no);
+
+      row.after(bar);
     });
     row.appendChild(del);
 
@@ -184,15 +212,40 @@ document.getElementById("prune").addEventListener("click", async (e) => {
   }, 1200);
 });
 
-document.getElementById("reset").addEventListener("click", async (e) => {
-  if (!confirm("Remove all ContainSite containers and data? You will need to log in to all sites again.")) return;
-  e.target.textContent = "Resetting...";
-  await browser.runtime.sendMessage({ type: "resetAll" });
-  e.target.textContent = "Done!";
-  setTimeout(() => {
-    e.target.textContent = "Reset All";
-    loadContainers();
-  }, 1200);
+document.getElementById("reset").addEventListener("click", (e) => {
+  const actions = e.target.closest(".actions");
+  const existing = actions.querySelector(".confirm-bar");
+  if (existing) { existing.remove(); return; }
+
+  const bar = document.createElement("div");
+  bar.className = "confirm-bar";
+  const msg = document.createElement("span");
+  msg.className = "confirm-msg";
+  msg.textContent = "Remove all containers and data?";
+  bar.appendChild(msg);
+
+  const yes = document.createElement("button");
+  yes.className = "confirm-yes";
+  yes.textContent = "Reset";
+  yes.addEventListener("click", async () => {
+    bar.remove();
+    e.target.textContent = "Resetting...";
+    await browser.runtime.sendMessage({ type: "resetAll" });
+    e.target.textContent = "Done!";
+    setTimeout(() => {
+      e.target.textContent = "Reset All";
+      loadContainers();
+    }, 1200);
+  });
+  bar.appendChild(yes);
+
+  const no = document.createElement("button");
+  no.className = "confirm-no";
+  no.textContent = "Cancel";
+  no.addEventListener("click", () => bar.remove());
+  bar.appendChild(no);
+
+  actions.appendChild(bar);
 });
 
 document.getElementById("search").addEventListener("input", (e) => {

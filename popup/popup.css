@@ -21,6 +21,12 @@ h1 { padding: 10px 12px 6px; font-size: 15px; font-weight: 600; border-bottom: 1
 .regen:hover { border-color: #888; color: #ddd; }
 .del { background: none; border: none; color: #664444; font-size: 15px; cursor: pointer; flex-shrink: 0; padding: 0 2px; line-height: 1; }
 .del:hover { color: #ff613d; }
+.confirm-bar { display: flex; align-items: center; gap: 8px; padding: 6px 12px; background: #2a1a1a; border-bottom: 1px solid #663333; }
+.confirm-msg { flex: 1; font-size: 11px; color: #ffaa88; }
+.confirm-yes { background: #663333; border: 1px solid #884444; color: #ff613d; border-radius: 4px; padding: 2px 8px; font-size: 11px; cursor: pointer; }
+.confirm-yes:hover { background: #884444; color: #ff8866; }
+.confirm-no { background: none; border: 1px solid #555; color: #aaa; border-radius: 4px; padding: 2px 8px; font-size: 11px; cursor: pointer; }
+.confirm-no:hover { border-color: #888; color: #ddd; }
 .actions { padding: 8px 12px; border-top: 1px solid #333; }
 #regen-all { width: 100%; padding: 6px; background: #333; border: 1px solid #555; color: #ccc; border-radius: 4px; cursor: pointer; font-size: 12px; }
 #regen-all:hover { background: #444; color: #fff; }
