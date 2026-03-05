@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.1
+
+- Fixed Discord and other complex web apps crashing due to DOM dimension noise
+- Removed offsetWidth/Height noise (too aggressive, broke layout calculations)
+- Changed document.fonts.check() to return true instead of false (prevents font loading hangs)
+- Added search bar to popup for filtering containers
+
 ## 0.5.0
 
 - Gamepad API spoofing (returns empty, prevents controller fingerprinting)
