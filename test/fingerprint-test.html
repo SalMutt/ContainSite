@@ -924,12 +924,13 @@ function testDocFonts() {
   report.docfonts = vals;
 
   let html = "";
-  html += row("document.fonts.size", size, size === 0 ? "spoofed" : "real");
-  html += row("check('16px Arial')", checkArial, !checkArial ? "spoofed" : "real");
-  html += row("check('16px monospace')", checkMono, !checkMono ? "spoofed" : "real");
+  html += row("document.fonts.size", size);
+  html += row("check('16px Arial')", checkArial, checkArial ? "spoofed" : "real");
+  html += row("check('16px monospace')", checkMono, checkMono ? "spoofed" : "real");
   el.innerHTML = html;
 
-  const spoofed = size === 0 && !checkArial && !checkMono;
+  // check() returning true for everything = spoofed (uniform response)
+  const spoofed = checkArial && checkMono;
   sectionStatus.docfonts = spoofed ? "pass" : "warn";
   setDot("dot-docfonts", sectionStatus.docfonts);
 }

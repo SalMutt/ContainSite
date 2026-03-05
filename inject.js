@@ -470,39 +470,13 @@
       return metrics;
     }, pageWindow.CanvasRenderingContext2D.prototype, { defineAs: "measureText" });
 
-    // --- DOM Element Dimension Noise ---
-    // Font enumeration measures offsetWidth/Height of test spans to detect installed fonts.
-    // Adding seeded noise prevents consistent dimension-based font fingerprinting.
-    const fontDimProps = ["offsetWidth", "offsetHeight", "scrollWidth", "scrollHeight", "clientWidth", "clientHeight"];
-    for (const prop of fontDimProps) {
-      const origDesc = Object.getOwnPropertyDescriptor(window.HTMLElement.prototype, prop);
-      if (origDesc && origDesc.get) {
-        const origGet = origDesc.get;
-        Object.defineProperty(pageWindow.HTMLElement.prototype, prop, {
-          get: exportFunction(function() {
-            const val = origGet.call(this);
-            return val + (fontRng() - 0.5) * 0.3;
-          }, pageWindow),
-          configurable: true,
-          enumerable: true
-        });
-      }
-    }
-
     // --- document.fonts (FontFaceSet) API Protection ---
-    // document.fonts.check() directly reveals installed fonts; size/iterators expose count.
+    // document.fonts.check() always returns true so font loading logic works,
+    // but prevents enumeration of specific fonts by giving a uniform response.
     if (pageWindow.document.fonts) {
       try {
         Object.defineProperty(pageWindow.document.fonts, "check", {
-          value: exportFunction(function() { return false; }, pageWindow),
-          configurable: true, enumerable: true
-        });
-        Object.defineProperty(pageWindow.document.fonts, "size", {
-          get: exportFunction(function() { return 0; }, pageWindow),
-          configurable: true, enumerable: true
-        });
-        Object.defineProperty(pageWindow.document.fonts, "forEach", {
-          value: exportFunction(function() {}, pageWindow),
+          value: exportFunction(function() { return true; }, pageWindow),
           configurable: true, enumerable: true
         });
       } catch(e) {}

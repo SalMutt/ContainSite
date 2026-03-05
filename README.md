@@ -27,8 +27,8 @@ Every website you visit is automatically placed in its own isolated container wi
 | Screen | Resolution, color depth, window dimensions |
 | Timezone | getTimezoneOffset, Date.toString, Intl.DateTimeFormat |
 | WebRTC | Forced relay-only ICE policy (blocks local IP leak) |
-| Fonts | Noise on measureText + DOM element dimensions (offsetWidth/Height etc.) |
-| Font API | document.fonts.check() blocked, size reports 0 |
+| Fonts | Noise on measureText (prevents font enumeration) |
+| Font API | document.fonts.check() returns uniform response |
 | ClientRects | Sub-pixel noise on getBoundingClientRect |
 | Plugins | Reports empty |
 | Battery | Always reports full/charging |
