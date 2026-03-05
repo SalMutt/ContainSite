@@ -85,4 +85,13 @@ document.getElementById("reset").addEventListener("click", async (e) => {
   }, 1200);
 });
 
+document.getElementById("search").addEventListener("input", (e) => {
+  const q = e.target.value.toLowerCase();
+  const rows = document.querySelectorAll("#container-list .row");
+  for (const row of rows) {
+    const text = row.textContent.toLowerCase();
+    row.classList.toggle("hidden", q && !text.includes(q));
+  }
+});
+
 loadContainers();

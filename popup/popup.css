@@ -1,7 +1,12 @@
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body { width: 300px; font: 13px/1.4 system-ui, sans-serif; color: #e0e0e0; background: #1e1e2e; }
 h1 { padding: 10px 12px 6px; font-size: 15px; font-weight: 600; border-bottom: 1px solid #333; }
+.search-wrap { padding: 6px 12px; border-bottom: 1px solid #2a2a3a; }
+#search { width: 100%; padding: 5px 8px; background: #2a2a3a; border: 1px solid #444; border-radius: 4px; color: #e0e0e0; font-size: 12px; outline: none; }
+#search:focus { border-color: #4a9eff; }
+#search::placeholder { color: #666; }
 #container-list { max-height: 320px; overflow-y: auto; }
+.row.hidden { display: none; }
 .row { display: flex; align-items: center; gap: 8px; padding: 6px 12px; border-bottom: 1px solid #2a2a3a; }
 .row:hover { background: #2a2a3a; }
 .dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
