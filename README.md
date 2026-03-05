@@ -12,6 +12,8 @@ Every website you visit is automatically placed in its own isolated container wi
 - **Cross-site navigation** — clicking a link to a different domain automatically switches to the correct container
 - **HTTP header spoofing** — User-Agent, Accept-Language, and Client Hints headers match each container's identity
 - **Configurable** — toggle individual fingerprint vectors, whitelist domains, manage containers from the options page
+- **Auto-prune** — automatically remove inactive containers after configurable days
+- **Import/export** — backup and restore all settings, seeds, and whitelist
 - **Zero configuration** — install and browse, everything is automatic
 
 ## Fingerprint vectors protected
@@ -36,6 +38,8 @@ Every website you visit is automatically placed in its own isolated container wi
 | matchMedia | Screen dimension queries return spoofed values |
 | Performance | performance.now() precision reduced to 0.1ms |
 | Storage | navigator.storage.estimate() returns generic values |
+| Gamepad | navigator.getGamepads() returns empty |
+| WebGL readPixels | Seeded noise on framebuffer reads |
 
 ## How it works
 
@@ -151,7 +155,7 @@ A built-in test page is included at `test/fingerprint-test.html`. To use it:
 ```
 manifest.json          MV2 extension manifest
 background.js          Container management, navigation, HTTP header spoofing
-inject.js              Fingerprint overrides (exportFunction-based, 18 vectors)
+inject.js              Fingerprint overrides (exportFunction-based, 20 vectors)
 lib/
   prng.js              Mulberry32 seeded PRNG
   fingerprint-gen.js   Deterministic seed → device profile generator

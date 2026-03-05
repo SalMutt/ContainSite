@@ -155,6 +155,7 @@ async function getOrCreateContainerForDomain(baseDomain) {
   await browser.storage.local.set({ containerSeeds: seeds });
 
   await buildProfileAndRegister(cookieStoreId, seeds[cookieStoreId]);
+  await updateBadge();
 
   return cookieStoreId;
 }
@@ -251,6 +252,14 @@ browser.tabs.onRemoved.addListener((tabId) => {
   delete pendingTabs[tabId];
 });
 
+// --- Badge: show active container count ---
+
+async function updateBadge() {
+  const count = Object.keys(domainMap).length;
+  browser.browserAction.setBadgeText({ text: count > 0 ? String(count) : "" });
+  browser.browserAction.setBadgeBackgroundColor({ color: "#4a9eff" });
+}
+
 // --- Message Handling (from popup and options page) ---
 
 browser.runtime.onMessage.addListener((message, sender) => {
@@ -265,6 +274,10 @@ browser.runtime.onMessage.addListener((message, sender) => {
   if (message.type === "setWhitelist") return handleSetWhitelist(message.whitelist);
   if (message.type === "getVectorSettings") return handleGetVectorSettings();
   if (message.type === "setVectorSettings") return handleSetVectorSettings(message.vectorSettings);
+  if (message.type === "exportSettings") return handleExportSettings();
+  if (message.type === "importSettings") return handleImportSettings(message.data);
+  if (message.type === "getAutoPruneSettings") return handleGetAutoPruneSettings();
+  if (message.type === "setAutoPruneSettings") return handleSetAutoPruneSettings(message.settings);
 });
 
 async function handleGetContainerList() {
@@ -362,6 +375,7 @@ async function handleResetAll() {
   managedContainerIds.clear();
   for (const key of Object.keys(containerProfiles)) delete containerProfiles[key];
   await browser.storage.local.clear();
+  await updateBadge();
 
   return { ok: true };
 }
@@ -381,9 +395,9 @@ async function handlePruneContainers() {
         await browser.contextualIdentities.remove(c.cookieStoreId);
         pruned++;
       } catch(e) {}
-      // onRemoved listener handles domainMap + managedContainerIds cleanup
     }
   }
+  await updateBadge();
   return { pruned };
 }
 
@@ -420,6 +434,82 @@ async function handleSetVectorSettings(vectorSettings) {
   await browser.storage.local.set({ vectorSettings });
   await registerAllKnownContainers();
   return { ok: true };
+}
+
+// --- Import/Export ---
+
+async function handleExportSettings() {
+  const stored = await browser.storage.local.get(null); // get everything
+  return {
+    version: browser.runtime.getManifest().version,
+    exportedAt: new Date().toISOString(),
+    domainMap,
+    containerSeeds: stored.containerSeeds || {},
+    containerSettings: stored.containerSettings || {},
+    vectorSettings: stored.vectorSettings || {},
+    whitelist: stored.whitelist || [],
+    autoPrune: stored.autoPrune || { enabled: false, days: 30 }
+  };
+}
+
+async function handleImportSettings(data) {
+  if (!data || !data.containerSeeds) return { ok: false, error: "Invalid data" };
+  await browser.storage.local.set({
+    containerSeeds: data.containerSeeds,
+    containerSettings: data.containerSettings || {},
+    vectorSettings: data.vectorSettings || {},
+    whitelist: data.whitelist || [],
+    autoPrune: data.autoPrune || { enabled: false, days: 30 }
+  });
+  cachedWhitelist = data.whitelist || [];
+  if (data.domainMap) {
+    domainMap = data.domainMap;
+    await saveDomainMap();
+  }
+  await registerAllKnownContainers();
+  await updateBadge();
+  return { ok: true };
+}
+
+// --- Auto-Prune ---
+
+async function handleGetAutoPruneSettings() {
+  const stored = await browser.storage.local.get("autoPrune");
+  return stored.autoPrune || { enabled: false, days: 30 };
+}
+
+async function handleSetAutoPruneSettings(settings) {
+  await browser.storage.local.set({ autoPrune: settings });
+  return { ok: true };
+}
+
+async function runAutoPrune() {
+  const stored = await browser.storage.local.get("autoPrune");
+  const settings = stored.autoPrune || { enabled: false, days: 30 };
+  if (!settings.enabled) return;
+
+  const tabs = await browser.tabs.query({});
+  const activeContainers = new Set(tabs.map(t => t.cookieStoreId));
+
+  // Track last activity per container
+  const actStored = await browser.storage.local.get("containerActivity");
+  const activity = actStored.containerActivity || {};
+  const now = Date.now();
+  const cutoff = now - (settings.days * 24 * 60 * 60 * 1000);
+
+  for (const cid of managedContainerIds) {
+    if (activeContainers.has(cid)) {
+      activity[cid] = now; // update last active
+    } else if (!activity[cid]) {
+      activity[cid] = now; // first seen, set to now
+    } else if (activity[cid] < cutoff) {
+      // Inactive beyond threshold — prune
+      try {
+        await browser.contextualIdentities.remove(cid);
+      } catch(e) {}
+    }
+  }
+  await browser.storage.local.set({ containerActivity: activity });
 }
 
 // --- Container Lifecycle ---
@@ -507,6 +597,11 @@ async function init() {
   }
   cachedWhitelist = stored.whitelist || [];
   await registerAllKnownContainers();
+  await updateBadge();
+
+  // Run auto-prune on startup and every 6 hours
+  await runAutoPrune();
+  setInterval(runAutoPrune, 6 * 60 * 60 * 1000);
 }
 
 init();

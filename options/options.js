@@ -215,12 +215,74 @@ document.getElementById("reset").addEventListener("click", async (e) => {
   }, 1200);
 });
 
+// --- Auto-Prune ---
+
+async function loadAutoPrune() {
+  const settings = await browser.runtime.sendMessage({ type: "getAutoPruneSettings" });
+  document.getElementById("auto-prune-enabled").checked = settings.enabled;
+  document.getElementById("auto-prune-days").value = settings.days || 30;
+}
+
+async function saveAutoPrune() {
+  const enabled = document.getElementById("auto-prune-enabled").checked;
+  const days = parseInt(document.getElementById("auto-prune-days").value) || 30;
+  await browser.runtime.sendMessage({
+    type: "setAutoPruneSettings",
+    settings: { enabled, days: Math.max(1, Math.min(365, days)) }
+  });
+}
+
+document.getElementById("auto-prune-enabled").addEventListener("change", saveAutoPrune);
+document.getElementById("auto-prune-days").addEventListener("change", saveAutoPrune);
+
+// --- Import / Export ---
+
+document.getElementById("export-btn").addEventListener("click", async (e) => {
+  e.target.textContent = "Exporting...";
+  const data = await browser.runtime.sendMessage({ type: "exportSettings" });
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `containsite-backup-${new Date().toISOString().slice(0, 10)}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+  e.target.textContent = "Exported!";
+  setTimeout(() => { e.target.textContent = "Export Settings"; }, 1200);
+});
+
+document.getElementById("import-btn").addEventListener("click", () => {
+  document.getElementById("import-file").click();
+});
+
+document.getElementById("import-file").addEventListener("change", async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const btn = document.getElementById("import-btn");
+  btn.textContent = "Importing...";
+  try {
+    const text = await file.text();
+    const data = JSON.parse(text);
+    const result = await browser.runtime.sendMessage({ type: "importSettings", data });
+    if (result.ok) {
+      btn.textContent = "Imported!";
+      await Promise.all([loadVectors(), loadWhitelist(), loadContainers(), loadAutoPrune()]);
+    } else {
+      btn.textContent = "Error: " + (result.error || "Unknown");
+    }
+  } catch(err) {
+    btn.textContent = "Invalid file";
+  }
+  e.target.value = "";
+  setTimeout(() => { btn.textContent = "Import Settings"; }, 2000);
+});
+
 // --- Init ---
 
 async function init() {
   const manifest = browser.runtime.getManifest();
   document.getElementById("version").textContent = `v${manifest.version}`;
-  await Promise.all([loadVectors(), loadWhitelist(), loadContainers()]);
+  await Promise.all([loadVectors(), loadWhitelist(), loadContainers(), loadAutoPrune()]);
 }
 
 init();

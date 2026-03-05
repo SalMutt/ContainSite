@@ -200,6 +200,18 @@
   <div class="section-body" id="clienthints-results"></div>
 </div>
 
+<!-- Gamepad API -->
+<div class="section" id="sec-gamepad">
+  <div class="section-header"><span class="status-dot pending" id="dot-gamepad"></span><h2>Gamepad API</h2></div>
+  <div class="section-body" id="gamepad-results"></div>
+</div>
+
+<!-- WebGL readPixels -->
+<div class="section" id="sec-readpixels">
+  <div class="section-header"><span class="status-dot pending" id="dot-readpixels"></span><h2>WebGL readPixels</h2></div>
+  <div class="section-body" id="readpixels-results"></div>
+</div>
+
 <button class="copy-btn" onclick="copyReport()">Copy Full Report to Clipboard</button>
 
 <canvas id="test-canvas" width="300" height="60"></canvas>
@@ -981,6 +993,60 @@ async function testClientHints() {
   }
 }
 
+// ── Gamepad API ──
+function testGamepad() {
+  const el = document.getElementById("gamepad-results");
+  if (!navigator.getGamepads) {
+    report.gamepad = { status: "API not available" };
+    el.innerHTML = row("Status", "navigator.getGamepads not available", "");
+    sectionStatus.gamepad = "warn";
+    setDot("dot-gamepad", "warn");
+    return;
+  }
+
+  const gamepads = navigator.getGamepads();
+  const count = Array.from(gamepads).filter(g => g !== null).length;
+  report.gamepad = { totalSlots: gamepads.length, connectedCount: count };
+  el.innerHTML = row("Gamepad slots", gamepads.length) +
+                 row("Connected gamepads", count, count === 0 ? "spoofed" : "real");
+  sectionStatus.gamepad = count === 0 ? "pass" : "warn";
+  setDot("dot-gamepad", sectionStatus.gamepad);
+}
+
+// ── WebGL readPixels ──
+async function testReadPixels() {
+  const el = document.getElementById("readpixels-results");
+  const c = document.createElement("canvas");
+  c.width = 64;
+  c.height = 64;
+  const gl = c.getContext("webgl");
+  if (!gl) {
+    report.readpixels = { status: "WebGL not available" };
+    el.innerHTML = row("Status", "WebGL not available", "");
+    sectionStatus.readpixels = "warn";
+    setDot("dot-readpixels", "warn");
+    return;
+  }
+
+  // Draw something
+  gl.clearColor(0.5, 0.3, 0.7, 1.0);
+  gl.clear(gl.COLOR_BUFFER_BIT);
+
+  const pixels = new Uint8Array(64 * 64 * 4);
+  gl.readPixels(0, 0, 64, 64, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+
+  // Hash the pixel data
+  let sum = 0;
+  for (let i = 0; i < pixels.length; i++) sum += pixels[i];
+  const hash = await sha256Short(sum.toString());
+
+  report.readpixels = { pixelSum: sum, hash };
+  el.innerHTML = row("readPixels hash", hash) +
+                 row("Pixel sum", sum);
+  sectionStatus.readpixels = "pass";
+  setDot("dot-readpixels", "pass");
+}
+
 // ── Summary ──
 function updateSummary() {
   let pass = 0, fail = 0, warn = 0;
@@ -1060,6 +1126,7 @@ async function runAll() {
   try { testPerf(); } catch(e) { console.error("perf test:", e); }
   try { testFontDOM(); } catch(e) { console.error("fontdom test:", e); }
   try { testDocFonts(); } catch(e) { console.error("docfonts test:", e); }
+  try { testGamepad(); } catch(e) { console.error("gamepad test:", e); }
 
   // Async tests — run in parallel with individual error handling
   await Promise.allSettled([
@@ -1070,6 +1137,7 @@ async function runAll() {
     testHeaders(),
     testStorage(),
     testClientHints(),
+    testReadPixels(),
   ]);
 
   updateSummary();

@@ -47,6 +47,32 @@
       </section>
 
       <section>
+        <h2>Auto-Prune</h2>
+        <p class="desc">Automatically remove inactive containers with no open tabs after a set number of days.</p>
+        <div class="auto-prune-row">
+          <label class="toggle-label">
+            <input type="checkbox" id="auto-prune-enabled" class="toggle">
+            <span>Enable auto-prune</span>
+          </label>
+          <div class="prune-days">
+            <span>after</span>
+            <input type="number" id="auto-prune-days" min="1" max="365" value="30" class="days-input">
+            <span>days</span>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <h2>Import / Export</h2>
+        <p class="desc">Backup or restore all settings, seeds, and whitelist.</p>
+        <div class="bulk-row">
+          <button id="export-btn" class="btn">Export Settings</button>
+          <button id="import-btn" class="btn secondary">Import Settings</button>
+          <input type="file" id="import-file" accept=".json" hidden>
+        </div>
+      </section>
+
+      <section>
         <h2>Bulk Actions</h2>
         <div class="bulk">
           <button id="regen-all" class="btn">Regenerate All Fingerprints</button>

@@ -675,6 +675,46 @@
 
     patchWebGLExtensions("WebGLRenderingContext");
     patchWebGLExtensions("WebGL2RenderingContext");
+
+    // --- readPixels noise ---
+    // Like canvas noise, adds tiny seeded perturbation to WebGL framebuffer reads
+    function patchWebGLReadPixels(protoName) {
+      const pageProto = pageWindow[protoName];
+      if (!pageProto) return;
+      const origProto = window[protoName];
+      if (!origProto) return;
+
+      const origReadPixels = origProto.prototype.readPixels;
+      exportFunction(function(x, y, width, height, format, type, pixels) {
+        origReadPixels.call(this, x, y, width, height, format, type, pixels);
+        if (pixels && pixels.length > 0 && CONFIG.canvasSeed) {
+          const rng = mulberry32(CONFIG.canvasSeed);
+          for (let i = 0; i < pixels.length; i += 4) {
+            if (rng() < 0.1) {
+              const ch = (rng() * 3) | 0;
+              const delta = rng() < 0.5 ? -1 : 1;
+              pixels[i + ch] = Math.max(0, Math.min(255, pixels[i + ch] + delta));
+            }
+          }
+        }
+      }, pageProto.prototype, { defineAs: "readPixels" });
+    }
+
+    patchWebGLReadPixels("WebGLRenderingContext");
+    patchWebGLReadPixels("WebGL2RenderingContext");
+  }
+
+  // =========================================================================
+  //  GAMEPAD API PROTECTION
+  // =========================================================================
+  //  navigator.getGamepads() reveals connected game controllers (count, IDs)
+
+  if (vectorEnabled("navigator") && pageWindow.navigator.getGamepads) {
+    try {
+      exportFunction(function() {
+        return cloneInto([null, null, null, null], pageWindow);
+      }, pageWindow.Navigator.prototype, { defineAs: "getGamepads" });
+    } catch(e) {}
   }
 
   // =========================================================================

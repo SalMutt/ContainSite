@@ -64,6 +64,13 @@ tr:hover td { background: #2a2a3a; }
 
 .td-actions { display: flex; gap: 4px; justify-content: flex-end; }
 
+/* Auto-prune */
+.auto-prune-row { display: flex; align-items: center; gap: 16px; }
+.toggle-label { display: flex; align-items: center; gap: 8px; font-size: 12px; cursor: pointer; }
+.prune-days { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #aaa; }
+.days-input { width: 50px; padding: 4px 6px; background: #2a2a3a; border: 1px solid #444; border-radius: 4px; color: #e0e0e0; font-size: 12px; text-align: center; }
+.days-input:focus { border-color: #4a9eff; outline: none; }
+
 /* Bulk actions */
 .bulk { display: flex; flex-direction: column; gap: 6px; }
 .bulk #regen-all { width: 100%; }
