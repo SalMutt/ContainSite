@@ -227,20 +227,17 @@ async function assignTabToContainer(tabId, url, baseDomain) {
 // Intercept new navigations
 browser.webRequest.onBeforeRequest.addListener(
   function(details) {
-    if (details.type !== "main_frame") return {};
-    if (details.tabId === -1) return {};
+    if (details.type !== "main_frame") return;
+    if (details.tabId === -1) return;
 
     const domain = extractDomain(details.url);
-    if (!domain) return {};
+    if (!domain) return;
 
     const baseDomain = getBaseDomain(domain);
-
-    // Trigger async container assignment
     assignTabToContainer(details.tabId, details.url, baseDomain);
-    return {};
   },
-  { urls: ["<all_urls>"] },
-  ["blocking"]
+  { urls: ["<all_urls>"] }
+  // no "blocking" — listener is informational only
 );
 
 // Handle in-tab navigations (address bar, link clicks)
