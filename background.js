@@ -648,7 +648,7 @@ browser.webRequest.onBeforeSendHeaders.addListener(
     }
     return { requestHeaders: headers };
   },
-  { urls: ["<all_urls>"] },
+  { urls: ["<all_urls>"], types: ["main_frame", "sub_frame", "xmlhttprequest"] },
   ["blocking", "requestHeaders"]
 );
 
