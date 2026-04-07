@@ -1,132 +1,176 @@
 # ContainSite
 
-Per-site container isolation with unique device fingerprints for Firefox and LibreWolf.
-
-Every website you visit is automatically placed in its own isolated container with a unique, deterministic device identity. Sites cannot share sessions, cookies, or correlate you through browser fingerprinting.
+Per-site container isolation with unique device fingerprints for Firefox.
 
 ## What it does
 
-- **Automatic per-site containers** — each domain gets its own container on first visit, no configuration needed
-- **Unique fingerprints per container** — every container presents a completely different device to websites
-- **Auth-aware** — login redirects (e.g. YouTube to Google) stay in the originating container so authentication works seamlessly
-- **Cross-site navigation** — clicking a link to a different domain automatically switches to the correct container
-- **HTTP header spoofing** — User-Agent, Accept-Language, and Client Hints headers match each container's identity
-- **Configurable** — toggle individual fingerprint vectors, whitelist domains, manage containers from the options page
-- **Auto-prune** — automatically remove inactive containers after configurable days
-- **Import/export** — backup and restore all settings, seeds, and whitelist
-- **Zero configuration** — install and browse, everything is automatic
+Every website you visit is automatically placed in its own Firefox container with a unique, deterministic device fingerprint. Each container presents a completely different device identity to websites — a different User-Agent, canvas fingerprint, WebGL renderer, screen resolution, timezone, language, and more. Sites cannot share cookies, sessions, or correlate you through browser fingerprinting across domains.
 
-## Fingerprint vectors protected
+The fingerprint for each container is generated from a random seed using a deterministic PRNG (Mulberry32). The same seed always produces the same device profile, so your identity within a site stays consistent across sessions while remaining completely different from every other site.
+
+## Key features
+
+- **Automatic container creation** — each domain gets its own container on first visit, no configuration needed
+- **Per-container fingerprint generation** — deterministic from a random seed; coherent device profiles (platform, GPU, resolution, and User-Agent all match)
+- **HTTP header spoofing** — User-Agent, Accept-Language, and Client Hints headers are modified per container to match the JS-side fingerprint
+- **CSP-safe fingerprint injection** — content scripts use Firefox's `exportFunction()` and `wrappedJSObject` APIs to override page-context APIs from the isolated content script world, bypassing Content Security Policy restrictions
+- **Auth provider bypass** — login redirects to Google (accounts.google.com, accounts.youtube.com) stay in the originating container so authentication works seamlessly
+- **Preserve original tab** — cross-domain link clicks open the target in a new container tab while keeping the original tab intact
+- **Domain whitelist** — exclude specific domains from containerization and fingerprint spoofing
+- **Per-container vector overrides** — enable or disable specific spoofing vectors on a per-container basis, with global defaults
+- **Global and per-container settings** — global vector toggles in the options page, per-container overrides via the popup gear icon
+- **Auto-prune inactive containers** — automatically remove containers with no open tabs after a configurable number of days
+- **Import/export settings** — backup and restore all seeds, vector settings, whitelist, and container mappings as JSON
+- **Container management** — regenerate fingerprints, delete individual containers, prune unused containers, or reset everything
+
+## Fingerprint vectors
 
 | Vector | Method |
 |---|---|
-| Canvas | Deterministic pixel noise per container seed |
-| WebGL | Spoofed GPU vendor, renderer, max parameters, and normalized extensions |
-| AudioContext | Seeded noise on frequency and channel data |
-| Navigator | CPU cores, platform, languages, device memory, oscpu |
-| Screen | Resolution, color depth, window dimensions |
-| Timezone | getTimezoneOffset, Date.toString, Intl.DateTimeFormat |
-| WebRTC | Forced relay-only ICE policy (blocks local IP leak) |
-| Fonts | Noise on measureText (prevents font enumeration) |
-| Font API | document.fonts.check() returns uniform response |
-| ClientRects | Sub-pixel noise on getBoundingClientRect |
-| Plugins | Reports empty |
-| Battery | Always reports full/charging |
-| Connection | Fixed network profile |
-| HTTP Headers | User-Agent, Accept-Language spoofed per container; Client Hints stripped |
-| Speech Synthesis | getVoices() returns empty, voiceschanged suppressed |
-| matchMedia | Screen dimension queries return spoofed values |
-| Performance | performance.now() precision reduced to 0.1ms |
-| Storage | navigator.storage.estimate() returns generic values |
-| Gamepad | navigator.getGamepads() returns empty |
-| WebGL readPixels | Seeded noise on framebuffer reads |
+| Canvas | Deterministic pixel noise on `toDataURL`, `toBlob`, `getImageData` |
+| WebGL | Spoofed GPU vendor/renderer, normalized max parameters, baseline extension set |
+| WebGL readPixels | Seeded pixel noise on framebuffer reads |
+| AudioContext | Seeded noise on `getFloatFrequencyData`, `getByteFrequencyData`, `getChannelData` |
+| Navigator | CPU cores, platform, languages, device memory, User-Agent, appVersion, oscpu |
+| Screen | Resolution, color depth, window dimensions (`outerWidth/Height`, `innerWidth/Height`) |
+| Timezone | `getTimezoneOffset`, `Date.toString`, `Date.toTimeString`, `Intl.DateTimeFormat.resolvedOptions` |
+| WebRTC | Host candidate filtering in SDP (strips local IP addresses) |
+| Fonts | Noise on `measureText` width; `document.fonts.check()` returns uniform `true` |
+| ClientRects | Sub-pixel noise on `getBoundingClientRect` and `getClientRects` |
+| Plugins | `navigator.plugins` and `navigator.mimeTypes` report empty |
+| Battery | `navigator.getBattery()` always reports full/charging |
+| Connection | `navigator.connection` returns fixed network profile (4g, 10 Mbps, 50ms RTT) |
+| HTTP Headers | User-Agent, Accept-Language spoofed per container; Client Hints (Sec-CH-UA, Sec-CH-UA-Platform) stripped or overridden |
+| Speech Synthesis | `speechSynthesis.getVoices()` returns empty; `onvoiceschanged` suppressed |
+| matchMedia | Screen dimension media queries return results consistent with spoofed screen size |
+| Performance | `performance.now()` precision reduced to 0.1ms |
+| Storage | `navigator.storage.estimate()` returns generic values (2 GB quota, 0 usage) |
+| Gamepad | `navigator.getGamepads()` returns empty array |
 
 ## How it works
 
 1. You visit `youtube.com` in a normal tab
-2. ContainSite creates a `youtube.com` container and reopens the tab in it
-3. A deterministic fingerprint is generated from a random seed and injected via `exportFunction()` before any page scripts run
-4. You visit `gmail.com` — gets its own container with a different fingerprint
-5. YouTube and Gmail cannot share cookies, sessions, or device identity
+2. ContainSite intercepts the navigation, creates a `youtube.com` container, and reopens the tab in it
+3. A deterministic fingerprint profile is generated from a random seed and registered as a content script for that container
+4. The content script runs at `document_start` and uses `exportFunction()` to override page APIs before any site scripts execute
+5. HTTP headers (User-Agent, Accept-Language) are modified in `onBeforeSendHeaders` to match the container's JS-side identity
+6. You visit `gmail.com` — it gets its own container with a completely different fingerprint
+7. YouTube and Gmail cannot share cookies, sessions, or device identity
 
-When YouTube redirects you to `accounts.google.com` for login, the redirect stays in YouTube's container. Gmail has its own separate Google login in its own container. Same authentication flow, fully isolated identities.
+When YouTube redirects to `accounts.google.com` for login, the redirect stays in YouTube's container. Gmail has its own separate Google login in its own container.
 
 ## Architecture
 
 ```
-Background Script
-  ├── Auto-creates containers per domain (contextualIdentities API)
-  ├── Generates deterministic fingerprint from seed (Mulberry32 PRNG)
-  ├── Registers per-container content scripts (contentScripts.register + cookieStoreId)
-  ├── Intercepts navigation to assign tabs to containers
-  └── Spoofs HTTP headers (User-Agent, Accept-Language, Client Hints) per container
+Background Script (background.js)
+  |- Intercepts main_frame navigations (webRequest.onBeforeRequest)
+  |- Creates containers per domain (contextualIdentities API)
+  |- Generates deterministic profiles from seed (Mulberry32 PRNG)
+  |- Registers per-container content scripts (contentScripts.register + cookieStoreId filter)
+  |- Spoofs HTTP headers per container (webRequest.onBeforeSendHeaders)
+  |- Manages container lifecycle, domain mapping, auto-prune
+  '- Handles messages from popup and options page
 
-Content Script (per container, ISOLATED world, document_start)
-  └── Uses exportFunction() + wrappedJSObject to override page APIs
-      ├── Canvas, WebGL, AudioContext prototypes
-      ├── Navigator, Screen, Performance properties
-      ├── Timezone (Date, Intl.DateTimeFormat)
-      ├── WebRTC (RTCPeerConnection)
-      ├── Font metrics (measureText, DOM dimensions, document.fonts)
-      ├── ClientRects, Battery, Connection, Storage
-      ├── Speech synthesis, matchMedia
-      └── Plugins, mimeTypes
+Content Script (inject.js, per container, ISOLATED world, document_start)
+  '- Uses exportFunction() + wrappedJSObject to override page APIs
+      |- Canvas (toDataURL, toBlob, getImageData)
+      |- WebGL (getParameter, getSupportedExtensions, readPixels)
+      |- AudioContext (frequency data, channel data)
+      |- Navigator (properties, languages, plugins, battery, connection, gamepad, storage)
+      |- Screen (dimensions, color depth, window size)
+      |- Timezone (Date methods, Intl.DateTimeFormat)
+      |- WebRTC (SDP host candidate filtering)
+      |- Fonts (measureText noise, document.fonts.check)
+      |- ClientRects (getBoundingClientRect, getClientRects)
+      |- Speech synthesis (getVoices, onvoiceschanged)
+      |- matchMedia (screen dimension queries)
+      '- Performance (performance.now precision)
+
+Fingerprint Generator (lib/fingerprint-gen.js)
+  '- Seed -> coherent device profile (archetype-based: Windows, Linux, macOS)
+      |- Platform, User-Agent, appVersion, oscpu
+      |- GPU vendor + renderer (matching platform)
+      |- Screen resolution, color depth
+      |- CPU cores, device memory
+      |- Languages, timezone
+      '- Sub-seeds for canvas, audio, font, and rect noise
+
+PRNG (lib/prng.js)
+  '- Mulberry32: fast, deterministic 32-bit PRNG
 ```
 
-Uses Firefox's `exportFunction()` API to inject overrides from the isolated content script world directly into the page context. This bypasses Content Security Policy restrictions that block inline script injection.
+## Installation
 
-## Install
+### From source (development)
 
-### From file
+1. Clone the repository
+2. Open `about:debugging#/runtime/this-firefox` in Firefox
+3. Click **Load Temporary Add-on...**
+4. Select `manifest.json` from the cloned directory
+
+### From .xpi file
 
 1. Download the latest `.xpi` from [Releases](../../releases)
-2. In Firefox/LibreWolf: `about:addons` → gear icon → "Install Add-on From File..."
+2. In Firefox/LibreWolf: `about:addons` → gear icon → **Install Add-on From File...**
 3. Select the `.xpi` file
 
-For unsigned installs, set `xpinstall.signatures.required` to `false` in `about:config` (LibreWolf has this off by default).
+For unsigned installs, set `xpinstall.signatures.required` to `false` in `about:config` (LibreWolf has this disabled by default).
 
-### From source
+### Packaging
 
-1. Clone the repo
-2. Go to `about:debugging#/runtime/this-firefox`
-3. Click "Load Temporary Add-on..."
-4. Select `manifest.json`
+No build tools required. The extension is plain JavaScript with no dependencies.
 
-## Popup UI
+```sh
+zip -r ContainSite.xpi manifest.json background.js inject.js lib/ popup/ options/ icons/icon-48.png icons/icon-96.png
+```
 
-Click the ContainSite toolbar icon to see all active containers. From there you can:
+## Permissions
 
+| Permission | Why it's needed |
+|---|---|
+| `contextualIdentities` | Create, query, and remove Firefox containers |
+| `cookies` | Required alongside `contextualIdentities` to access container cookie stores |
+| `storage` | Persist domain-to-container mappings, fingerprint seeds, settings, and whitelist |
+| `tabs` | Open tabs in specific containers, detect active containers for pruning, preserve original tabs on cross-domain navigation |
+| `webRequest` | Intercept navigations to route them into the correct container |
+| `webRequestBlocking` | Synchronously cancel and redirect navigations before they complete; modify HTTP headers before they are sent |
+| `<all_urls>` | Apply container routing and header spoofing to all websites |
+
+## Configuration
+
+### Popup
+
+Click the ContainSite toolbar icon to see all managed containers. From there you can:
+
+- **Search** containers by name or domain
 - **Toggle** fingerprint spoofing on/off per container
-- **Regenerate** a container's fingerprint (creates a new device identity)
+- **Gear icon** — open per-container vector settings to override global defaults for individual sites
+- **New** — regenerate a container's fingerprint seed (creates a new device identity)
+- **Delete** — remove a container and all its data
+- **Regenerate All** — generate new fingerprints for every container
 - **Prune Unused** — remove containers with no open tabs
-- **Reset All** — clear all containers and data
+- **Reset All** — delete all containers, seeds, and settings
 
-## Options Page
+### Options page
 
-Right-click the toolbar icon → **Manage Extension** → **Preferences** to open the full options page.
+Right-click the toolbar icon → **Manage Extension** → **Preferences**, or navigate to the extension's preferences in `about:addons`.
 
-### Fingerprint Vectors
+- **Fingerprint Vectors** — toggle individual spoofing vectors on/off globally (Canvas, WebGL, Audio, Navigator, Screen, Timezone, WebRTC, Fonts, Client Rects, Plugins, Battery, Connection)
+- **Domain Whitelist** — add domains that should never be containerized or fingerprint-spoofed
+- **Containers** — table of all managed containers with per-container toggle, regenerate, and delete
+- **Auto-Prune** — enable automatic removal of inactive containers after a configurable number of days (1-365)
+- **Import/Export** — backup all settings to a JSON file or restore from a previous backup
+- **Bulk Actions** — regenerate all fingerprints, prune unused containers, or reset everything
 
-Toggle individual spoofing vectors on or off globally. Vectors can be independently controlled:
+## Privacy
 
-Canvas, WebGL, Audio, Navigator, Screen, Timezone, WebRTC, Fonts, Client Rects, Plugins, Battery, Connection
+ContainSite collects **zero data**. It runs entirely locally in your browser with no telemetry, no analytics, no external connections, and no third-party dependencies. All settings and fingerprint seeds are stored in the browser's local extension storage.
 
-### Domain Whitelist
+## Compatibility
 
-Add domains that should never be containerized or fingerprint-spoofed. Useful for internal sites, local services, or sites that break with container isolation.
-
-### Container Management
-
-Full table of all managed containers with per-container controls:
-
-- **Toggle** spoofing on/off
-- **Regenerate** fingerprint
-- **Delete** container (removes all cookies and data for that site)
-
-## Requirements
-
-- Firefox 100+ or LibreWolf
-- Containers must be enabled (`privacy.userContext.enabled = true` in `about:config`)
+- **Firefox 100+** (Manifest V2)
+- **LibreWolf** (fully compatible; unsigned install support out of the box)
+- Requires containers to be enabled: `privacy.userContext.enabled = true` in `about:config`
 
 ### Recommended about:config settings
 
@@ -142,46 +186,36 @@ LibreWolf may already have some of these set by default.
 
 ## Testing
 
-A built-in test page is included at `test/fingerprint-test.html`. To use it:
+A test page is included at `test/fingerprint-test.html`:
 
 1. Load the extension via `about:debugging`
 2. Add a hostname alias (e.g. `127.0.0.1 containsite-test.site` in `/etc/hosts`) — localhost is excluded from containerization
 3. Start a local server: `python3 -m http.server 8888 --bind 0.0.0.0`
-4. Open `http://containsite-test.site:8888/test/fingerprint-test.html` in a regular (non-private) window
+4. Open `http://containsite-test.site:8888/test/fingerprint-test.html` in a regular window
 5. Open the same URL in a different container tab and compare composite hashes
 
 ## File structure
 
 ```
 manifest.json          MV2 extension manifest
-background.js          Container management, navigation, HTTP header spoofing
-inject.js              Fingerprint overrides (exportFunction-based, 20 vectors)
+background.js          Container lifecycle, navigation interception, HTTP header spoofing
+inject.js              Fingerprint overrides (exportFunction-based, 20+ vectors)
 lib/
   prng.js              Mulberry32 seeded PRNG
-  fingerprint-gen.js   Deterministic seed → device profile generator
+  fingerprint-gen.js   Deterministic seed -> coherent device profile generator
 popup/
-  popup.html           Container list UI
-  popup.css            Styles
-  popup.js             Toggle, regenerate, prune, reset controls
+  popup.html           Container list popup
+  popup.css            Popup styles
+  popup.js             Toggle, regenerate, delete, prune, reset, per-container vectors
 options/
   options.html         Full options page (opens in tab)
-  options.css          Styles
-  options.js           Vector toggles, whitelist, container management
+  options.css          Options styles
+  options.js           Vector toggles, whitelist, containers, auto-prune, import/export
 test/
-  fingerprint-test.html  Comprehensive fingerprint verification page
+  fingerprint-test.html  Fingerprint verification page
 icons/
   icon-48.png          Toolbar icon
   icon-96.png          Extension icon
-```
-
-## Build
-
-No build tools required. The extension is plain JavaScript with no dependencies.
-
-To package as `.xpi`:
-
-```sh
-zip -r ContainSite.xpi manifest.json background.js inject.js lib/ popup/ options/ icons/icon-48.png icons/icon-96.png
 ```
 
 ## License

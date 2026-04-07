@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.5
+
+- Added `types` filter to `onBeforeSendHeaders` listener — header spoofing now only runs on `main_frame`, `sub_frame`, and `xmlhttprequest` (skips images, fonts, stylesheets, etc.)
+- Removed blocking flag from `onBeforeRequest` where it was unnecessary — only the cancel return uses blocking; the listener now correctly declares blocking only where needed
+- Preserve original tab on cross-domain link clicks — clicking a link to a different domain opens the target in a new container tab while keeping the originating tab open
+- Unified container assignment path using cancel-based approach for all navigations
+
 ## 0.5.4
 
 - Replaced system confirm dialogs with inline confirmation bars in popup

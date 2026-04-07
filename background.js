@@ -171,43 +171,21 @@ async function getOrCreateContainerForDomain(baseDomain) {
 // tabId -> baseDomain — tabs we just created, skip only for the same domain
 const createdByUs = {};
 
-// Handle a tab that needs to be in a container for a given domain
-async function assignTabToContainer(tabId, url, baseDomain) {
-  // Skip tabs we just created — but only for the domain we created them for
-  if (createdByUs[tabId] === baseDomain) return;
-  // Skip whitelisted domains
-  if (cachedWhitelist.includes(baseDomain)) return;
+// Cancel navigation synchronously, then open the URL in the correct
+// container (creating one if needed). Preserves the original tab when
+// the navigation was a cross-site link click.
+async function openInContainer(tabId, url, baseDomain, existingContainer, originUrl) {
   if (pendingTabs[tabId]) return;
   pendingTabs[tabId] = true;
 
   try {
+    const cookieStoreId = existingContainer || await getOrCreateContainerForDomain(baseDomain);
     const tab = await browser.tabs.get(tabId);
-    const cookieStoreId = await getOrCreateContainerForDomain(baseDomain);
 
-    if (tab.cookieStoreId === cookieStoreId) {
-      // Already in the correct container
-      delete pendingTabs[tabId];
-      return;
-    }
-
-    if (tab.cookieStoreId !== "firefox-default") {
-      // Tab is in a non-default container — only reassign if it's one we manage
-      if (!managedContainerIds.has(tab.cookieStoreId)) {
-        // Not a ContainSite-managed container — leave it alone
-        delete pendingTabs[tabId];
-        return;
-      }
-      // Tab is in our container navigating to a different domain.
-      // If target is an auth provider, keep in current container so auth
-      // cookies stay isolated (e.g. YouTube login via accounts.google.com
-      // stays in the youtube.com container, not the google.com container)
-      const hostname = extractDomain(url);
-      if (hostname && AUTH_BYPASS_DOMAINS.includes(hostname)) {
-        delete pendingTabs[tabId];
-        return;
-      }
-      // Otherwise reassign to correct container
-    }
+    // Preserve original tab if this was a cross-site link click
+    const originDomain = originUrl ? extractDomain(originUrl) : null;
+    const originBase = originDomain ? getBaseDomain(originDomain) : null;
+    const preserveOriginal = originBase && originBase !== baseDomain;
 
     const newTab = await browser.tabs.create({
       url: url,
@@ -215,42 +193,55 @@ async function assignTabToContainer(tabId, url, baseDomain) {
       index: tab.index + 1,
       active: tab.active
     });
-    // Mark the new tab — only skip reassignment for this same domain
     createdByUs[newTab.id] = baseDomain;
     setTimeout(() => { delete createdByUs[newTab.id]; }, 5000);
 
-    await browser.tabs.remove(tabId);
-  } catch(e) {}
-  delete pendingTabs[tabId];
+    if (!preserveOriginal) {
+      await browser.tabs.remove(tabId);
+    }
+  } catch(e) {
+  } finally {
+    delete pendingTabs[tabId];
+  }
 }
 
-// Intercept new navigations
+// Intercept main_frame navigations — always cancel and reopen in the
+// correct container, whether the container already exists or needs to
+// be created.
 browser.webRequest.onBeforeRequest.addListener(
   function(details) {
-    if (details.type !== "main_frame") return;
-    if (details.tabId === -1) return;
+    if (details.type !== "main_frame") return {};
+    if (details.tabId === -1) return {};
 
     const domain = extractDomain(details.url);
-    if (!domain) return;
+    if (!domain) return {};
 
     const baseDomain = getBaseDomain(domain);
-    assignTabToContainer(details.tabId, details.url, baseDomain);
+
+    if (createdByUs[details.tabId] === baseDomain) return {};
+    if (cachedWhitelist.includes(baseDomain)) return {};
+
+    const existingContainer = domainMap[baseDomain];
+    const cookieStoreId = details.cookieStoreId;
+
+    // If container exists and tab is already in it, no action needed
+    if (existingContainer && cookieStoreId === existingContainer) return {};
+
+    if (cookieStoreId !== "firefox-default") {
+      // Don't interfere with non-managed containers
+      if (!managedContainerIds.has(cookieStoreId)) return {};
+      // In a managed container — if target is an auth provider, keep in
+      // current container so auth cookies stay isolated
+      if (AUTH_BYPASS_DOMAINS.includes(domain)) return {};
+    }
+
+    // Cancel navigation and open in correct container
+    openInContainer(details.tabId, details.url, baseDomain, existingContainer, details.originUrl);
+    return { cancel: true };
   },
-  { urls: ["<all_urls>"] }
-  // no "blocking" — listener is informational only
+  { urls: ["<all_urls>"], types: ["main_frame"] },
+  ["blocking"]
 );
-
-// Handle in-tab navigations (address bar, link clicks)
-browser.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
-  if (!changeInfo.url) return;
-  if (pendingTabs[tabId]) return;
-
-  const domain = extractDomain(changeInfo.url);
-  if (!domain) return;
-
-  const baseDomain = getBaseDomain(domain);
-  await assignTabToContainer(tabId, changeInfo.url, baseDomain);
-});
 
 // Clean up tab tracking when tabs close
 browser.tabs.onRemoved.addListener((tabId) => {
