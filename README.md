@@ -17,6 +17,7 @@ The fingerprint for each container is generated from a random seed using a deter
 - **Auth provider bypass** — login redirects to Google (accounts.google.com, accounts.youtube.com) stay in the originating container so authentication works seamlessly
 - **Preserve original tab** — cross-domain link clicks open the target in a new container tab while keeping the original tab intact
 - **Domain whitelist** — exclude specific domains from containerization and fingerprint spoofing
+- **Cloudflare-safe mode** — per-container shield toggle that reduces spoofing to only vectors that don't create detectable inconsistencies with Cloudflare's bot detection, keeping canvas/audio/fonts/timezone/WebRTC spoofing active while using real UA/platform/WebGL/screen values
 - **Per-container vector overrides** — enable or disable specific spoofing vectors on a per-container basis, with global defaults
 - **Global and per-container settings** — global vector toggles in the options page, per-container overrides via the popup gear icon
 - **Auto-prune inactive containers** — automatically remove containers with no open tabs after a configurable number of days
@@ -46,6 +47,51 @@ The fingerprint for each container is generated from a random seed using a deter
 | Performance | `performance.now()` precision reduced to 0.1ms |
 | Storage | `navigator.storage.estimate()` returns generic values (2 GB quota, 0 usage) |
 | Gamepad | `navigator.getGamepads()` returns empty array |
+
+## Cloudflare-safe mode
+
+Cloudflare and similar bot-detection services cross-reference browser fingerprint data against external signals — TLS ClientHello fingerprints, GPU hardware databases, and network timing. When JavaScript-spoofed values contradict these external signals, the mismatch itself becomes a detection vector. Cloudflare-safe mode solves this by disabling the spoofing vectors that create detectable inconsistencies while keeping the ones that have no external cross-reference.
+
+### Vectors disabled in Cloudflare-safe mode
+
+These vectors are turned off because their spoofed values can be compared against out-of-band data:
+
+| Vector | Why it's disabled |
+|---|---|
+| User-Agent / platform / appVersion | TLS ClientHello fingerprint identifies the real browser; a mismatched UA string is an immediate red flag |
+| WebGL vendor / renderer | GPU strings can be validated against known hardware databases and driver capabilities |
+| Screen resolution | Window dimensions and CSS media queries can be cross-checked with reported screen size |
+| Plugins | Modern browsers report empty plugins natively; spoofing them is unnecessary and anomalous |
+| Connection (NetworkInformation) | Timing-based checks can infer real connection characteristics, contradicting spoofed values |
+| Hardware concurrency / device memory | Can be inferred from timing side-channels and correlated with TLS-identified platform |
+
+### Vectors that stay active
+
+These vectors add noise that cannot be cross-referenced against external signals:
+
+| Vector | Why it's safe |
+|---|---|
+| Canvas | Pixel-level noise has no external reference point; every GPU renders slightly differently |
+| AudioContext | Frequency/channel data noise is undetectable without a known-good baseline |
+| Fonts (measureText) | Text measurement noise cannot be validated externally |
+| ClientRects | Sub-pixel element positioning has no external cross-reference |
+| Timezone | Selected from real IANA timezones; no TLS or hardware signal reveals the real one |
+| Languages | Spoofed consistently between JS and Accept-Language header; no external contradiction |
+| WebRTC | Host candidate filtering (IP stripping) is indistinguishable from browser privacy settings |
+| Battery | Always reports full/charging; matches the majority of devices |
+| Speech synthesis | Empty voice list is normal for many configurations |
+| Performance | Reduced timer precision matches Firefox's built-in fingerprinting protection |
+| Storage | Generic quota values are indistinguishable from real responses |
+| Gamepad | Empty gamepad list is the norm for most users |
+
+### HTTP headers
+
+In Cloudflare-safe mode, HTTP header spoofing for User-Agent and Sec-CH-UA headers is also skipped — real browser headers are sent so they match the TLS fingerprint. Accept-Language spoofing continues because the spoofed languages are consistent with the JS-side `navigator.languages` value and have no external contradiction.
+
+### How to enable
+
+- **Per container:** Click the shield icon next to any container in the popup to toggle Cloudflare-safe mode on or off for that site.
+- **Bulk toggle:** On the options page, the Cloudflare-Safe Mode section has buttons to enable or disable the mode for all containers at once.
 
 ## How it works
 
@@ -144,7 +190,8 @@ Click the ContainSite toolbar icon to see all managed containers. From there you
 
 - **Search** containers by name or domain
 - **Toggle** fingerprint spoofing on/off per container
-- **Gear icon** — open per-container vector settings to override global defaults for individual sites
+- **Shield icon** — toggle Cloudflare-safe mode per container (reduces spoofing to avoid bot detection)
+- **Gear icon** — open per-container vector settings to override global defaults for individual sites (vectors locked by Cloudflare-safe mode are shown as disabled)
 - **New** — regenerate a container's fingerprint seed (creates a new device identity)
 - **Delete** — remove a container and all its data
 - **Regenerate All** — generate new fingerprints for every container
@@ -156,6 +203,7 @@ Click the ContainSite toolbar icon to see all managed containers. From there you
 Right-click the toolbar icon → **Manage Extension** → **Preferences**, or navigate to the extension's preferences in `about:addons`.
 
 - **Fingerprint Vectors** — toggle individual spoofing vectors on/off globally (Canvas, WebGL, Audio, Navigator, Screen, Timezone, WebRTC, Fonts, Client Rects, Plugins, Battery, Connection)
+- **Cloudflare-Safe Mode** — explanation of what the mode does, with bulk enable/disable buttons for all containers
 - **Domain Whitelist** — add domains that should never be containerized or fingerprint-spoofed
 - **Containers** — table of all managed containers with per-container toggle, regenerate, and delete
 - **Auto-Prune** — enable automatic removal of inactive containers after a configurable number of days (1-365)

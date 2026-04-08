@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.6.0
+
+- Cloudflare-safe mode: per-container toggle that disables spoofing vectors which create detectable mismatches with TLS fingerprints, GPU hardware, and timing attacks (User-Agent, WebGL vendor/renderer, screen resolution, hardware concurrency, device memory, plugins, connection)
+- Safe vectors remain active in Cloudflare-safe mode: canvas noise, audio noise, font noise, client rects noise, timezone, languages, WebRTC filtering, battery
+- HTTP headers in Cloudflare-safe mode: real User-Agent and Sec-CH-UA are preserved; Accept-Language still spoofed to match JS languages
+- Shield icon in popup for per-container Cloudflare-safe toggle
+- Gear panel shows locked/disabled vectors with explanatory tooltips when Cloudflare-safe is active
+- Options page section with mode explanation and bulk enable/disable for all containers
+- Setting persisted in containerSettings and included in import/export
+
 ## 0.5.5
 
 - Added `types` filter to `onBeforeSendHeaders` listener — header spoofing now only runs on `main_frame`, `sub_frame`, and `xmlhttprequest` (skips images, fonts, stylesheets, etc.)
