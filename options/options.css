@@ -71,6 +71,9 @@ tr:hover td { background: #2a2a3a; }
 .days-input { width: 50px; padding: 4px 6px; background: #2a2a3a; border: 1px solid #444; border-radius: 4px; color: #e0e0e0; font-size: 12px; text-align: center; }
 .days-input:focus { border-color: #4a9eff; outline: none; }
 
+/* Cloudflare-safe bulk */
+.cf-bulk-row { display: flex; gap: 6px; margin-top: 6px; }
+
 /* Bulk actions */
 .bulk { display: flex; flex-direction: column; gap: 6px; }
 .bulk #regen-all { width: 100%; }

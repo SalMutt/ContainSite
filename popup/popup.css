@@ -37,6 +37,9 @@ h1 { padding: 10px 12px 6px; font-size: 15px; font-weight: 600; border-bottom: 1
 .danger { background: #3a1a1a; border: 1px solid #663333; color: #ff613d; }
 .danger:hover { background: #4a2020; color: #ff8866; }
 
+.shield { background: none; border: none; color: #555; font-size: 13px; cursor: pointer; flex-shrink: 0; padding: 0 2px; line-height: 1; }
+.shield:hover { color: #e8a020; }
+.shield.active { color: #e8a020; }
 .gear { background: none; border: none; color: #666; font-size: 15px; cursor: pointer; flex-shrink: 0; padding: 0 2px; line-height: 1; }
 .gear:hover, .gear.active { color: #4a9eff; }
 .vector-panel { background: #252535; border-bottom: 1px solid #333; padding: 6px 12px 6px 30px; }
@@ -48,6 +51,9 @@ h1 { padding: 10px 12px 6px; font-size: 15px; font-weight: 600; border-bottom: 1
 .toggle.inherited { opacity: 0.5; }
 .vector-reset { background: none; border: none; color: #666; font-size: 12px; cursor: pointer; padding: 0 2px; visibility: visible; }
 .vector-reset:hover { color: #4a9eff; }
+.cf-note { font-size: 10px; color: #e8a020; padding: 2px 0 4px; }
+.vector-locked { color: #777; font-style: italic; }
+.toggle.locked { opacity: 0.35; cursor: not-allowed; }
 
 .dot-blue { background: #37adff; }
 .dot-turquoise { background: #00c79a; }

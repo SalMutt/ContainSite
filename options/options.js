@@ -185,6 +185,22 @@ async function loadContainers() {
   }
 }
 
+// --- Cloudflare-Safe Bulk Toggles ---
+
+document.getElementById("cf-safe-all").addEventListener("click", async (e) => {
+  e.target.textContent = "Enabling...";
+  await browser.runtime.sendMessage({ type: "setCloudflareSafeAll", enabled: true });
+  e.target.textContent = "Done!";
+  setTimeout(() => { e.target.textContent = "Enable for All Containers"; }, 800);
+});
+
+document.getElementById("cf-safe-none").addEventListener("click", async (e) => {
+  e.target.textContent = "Disabling...";
+  await browser.runtime.sendMessage({ type: "setCloudflareSafeAll", enabled: false });
+  e.target.textContent = "Done!";
+  setTimeout(() => { e.target.textContent = "Disable for All Containers"; }, 800);
+});
+
 // --- Bulk Actions ---
 
 document.getElementById("regen-all").addEventListener("click", async (e) => {

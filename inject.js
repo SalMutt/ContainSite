@@ -177,23 +177,28 @@
   // =========================================================================
 
   if (vectorEnabled("navigator")) {
-    const navOverrides = {
-      hardwareConcurrency: CONFIG.nav.hardwareConcurrency,
-      platform: CONFIG.nav.platform,
-      deviceMemory: CONFIG.nav.deviceMemory,
-      maxTouchPoints: CONFIG.nav.maxTouchPoints,
-      userAgent: CONFIG.nav.userAgent,
-      appVersion: CONFIG.nav.appVersion,
-      oscpu: CONFIG.nav.oscpu
-    };
+    // Cloudflare-safe mode: skip properties that create detectable mismatches
+    // with TLS fingerprints, GPU hardware, or timing attacks. Languages are
+    // safe because the HTTP Accept-Language header is also spoofed.
+    if (!CONFIG.cloudflareSafe) {
+      const navOverrides = {
+        hardwareConcurrency: CONFIG.nav.hardwareConcurrency,
+        platform: CONFIG.nav.platform,
+        deviceMemory: CONFIG.nav.deviceMemory,
+        maxTouchPoints: CONFIG.nav.maxTouchPoints,
+        userAgent: CONFIG.nav.userAgent,
+        appVersion: CONFIG.nav.appVersion,
+        oscpu: CONFIG.nav.oscpu
+      };
 
-    for (const [prop, value] of Object.entries(navOverrides)) {
-      if (value !== undefined) {
-        Object.defineProperty(pageWindow.Navigator.prototype, prop, {
-          get: exportFunction(function() { return value; }, pageWindow),
-          configurable: true,
-          enumerable: true
-        });
+      for (const [prop, value] of Object.entries(navOverrides)) {
+        if (value !== undefined) {
+          Object.defineProperty(pageWindow.Navigator.prototype, prop, {
+            get: exportFunction(function() { return value; }, pageWindow),
+            configurable: true,
+            enumerable: true
+          });
+        }
       }
     }
 

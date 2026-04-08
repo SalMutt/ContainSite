@@ -20,6 +20,26 @@
       </section>
 
       <section>
+        <h2>Cloudflare-Safe Mode</h2>
+        <p class="desc">
+          Cloudflare's bot detection cross-references browser signals for consistency.
+          Full fingerprint spoofing can trigger detection because spoofed values (User-Agent, WebGL renderer, screen resolution)
+          don't match what the TLS handshake, GPU hardware, and window manager actually report.
+        </p>
+        <p class="desc">
+          Cloudflare-safe mode disables vectors that create detectable inconsistencies (navigator identity, WebGL, screen, plugins, connection)
+          while keeping vectors that add noise without external cross-references (canvas, audio, fonts, client rects, timezone, languages, WebRTC, battery).
+        </p>
+        <p class="desc">
+          Enable per-container in the popup (shield icon), or use the bulk toggle below.
+        </p>
+        <div class="cf-bulk-row">
+          <button id="cf-safe-all" class="btn">Enable for All Containers</button>
+          <button id="cf-safe-none" class="btn secondary">Disable for All Containers</button>
+        </div>
+      </section>
+
+      <section>
         <h2>Domain Whitelist</h2>
         <p class="desc">Whitelisted domains are never containerized or fingerprint-spoofed.</p>
         <div class="whitelist-input">

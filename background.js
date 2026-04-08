@@ -96,11 +96,19 @@ async function buildProfileAndRegister(cookieStoreId, seed) {
     if (val !== null) profile.vectors[key] = val;
   }
 
+  // Cloudflare-safe mode: override vectors to avoid bot detection
+  const cfSafe = !!(containerSettings[cookieStoreId]?.cloudflare_safe);
+  if (cfSafe) {
+    profile.vectors = { ...CF_SAFE_VECTORS };
+    profile.cloudflareSafe = true;
+  }
+
   // Cache profile for HTTP header spoofing
   containerProfiles[cookieStoreId] = {
     userAgent: profile.nav.userAgent,
     languages: profile.nav.languages,
-    platform: profile.nav.platform
+    platform: profile.nav.platform,
+    cloudflareSafe: cfSafe
   };
 
   await registerForContainer(cookieStoreId, profile);
@@ -276,6 +284,8 @@ browser.runtime.onMessage.addListener((message, sender) => {
   if (message.type === "setAutoPruneSettings") return handleSetAutoPruneSettings(message.settings);
   if (message.type === "getContainerVectors") return handleGetContainerVectors(message.cookieStoreId);
   if (message.type === "setContainerVectors") return handleSetContainerVectors(message.cookieStoreId, message.vectors);
+  if (message.type === "toggleCloudflareSafe") return handleToggleCloudflareSafe(message.cookieStoreId, message.enabled);
+  if (message.type === "setCloudflareSafeAll") return handleSetCloudflareSafeAll(message.enabled);
 });
 
 async function handleGetContainerList() {
@@ -304,7 +314,8 @@ async function handleGetContainerList() {
       icon: c.icon,
       domain: reverseDomainMap[c.cookieStoreId] || null,
       enabled: (settings[c.cookieStoreId]?.enabled !== false),
-      hasSeed: !!seeds[c.cookieStoreId]
+      hasSeed: !!seeds[c.cookieStoreId],
+      cloudflareSafe: !!(settings[c.cookieStoreId]?.cloudflare_safe)
     }));
 }
 
@@ -540,6 +551,32 @@ async function handleSetContainerVectors(cookieStoreId, vectors) {
   return { ok: true };
 }
 
+async function handleToggleCloudflareSafe(cookieStoreId, enabled) {
+  const stored = await browser.storage.local.get(["containerSettings", "containerSeeds"]);
+  const settings = stored.containerSettings || {};
+  settings[cookieStoreId] = { ...settings[cookieStoreId], cloudflare_safe: enabled };
+  await browser.storage.local.set({ containerSettings: settings });
+
+  const seeds = stored.containerSeeds || {};
+  if (seeds[cookieStoreId] && settings[cookieStoreId]?.enabled !== false) {
+    await buildProfileAndRegister(cookieStoreId, seeds[cookieStoreId]);
+  }
+  return { ok: true };
+}
+
+async function handleSetCloudflareSafeAll(enabled) {
+  const stored = await browser.storage.local.get(["containerSettings", "containerSeeds"]);
+  const settings = stored.containerSettings || {};
+  const seeds = stored.containerSeeds || {};
+
+  for (const cookieStoreId of Object.keys(seeds)) {
+    settings[cookieStoreId] = { ...settings[cookieStoreId], cloudflare_safe: enabled };
+  }
+  await browser.storage.local.set({ containerSettings: settings });
+  await registerAllKnownContainers();
+  return { ok: true };
+}
+
 async function runAutoPrune() {
   const stored = await browser.storage.local.get("autoPrune");
   const settings = stored.autoPrune || { enabled: false, days: 30 };
@@ -603,6 +640,23 @@ function formatAcceptLanguage(languages) {
 // Auth domains where UA spoofing breaks login flows
 const AUTH_BYPASS_DOMAINS = ["accounts.google.com", "accounts.youtube.com"];
 
+// Cloudflare-safe mode: vectors that are safe to spoof without creating
+// detectable inconsistencies with TLS fingerprints, GPU hardware, or timing attacks
+const CF_SAFE_VECTORS = {
+  canvas: true,       // pixel noise, no external reference to mismatch
+  audio: true,        // frequency/channel noise, same reasoning
+  fonts: true,        // measureText width noise, subtle
+  clientRects: true,  // sub-pixel noise on bounding rects
+  timezone: true,     // no external cross-reference
+  navigator: true,    // kept enabled but inject.js skips UA/platform/cores/memory
+  webrtc: true,       // IP filtering always safe
+  battery: true,      // full/charging is common
+  webgl: false,       // GPU hardware mismatch with real GPU
+  screen: false,      // window manager leaks real values
+  plugins: false,     // unnecessary override in modern Firefox
+  connection: false   // timing reveals real values
+};
+
 browser.webRequest.onBeforeSendHeaders.addListener(
   function(details) {
     // cookieStoreId is available in Firefox 77+ webRequest details
@@ -616,25 +670,24 @@ browser.webRequest.onBeforeSendHeaders.addListener(
     } catch(e) {}
 
     const headers = details.requestHeaders;
-    // Map platform to Client Hints platform name
-    const platformMap = {
-      "Win32": "Windows", "Linux x86_64": "Linux", "MacIntel": "macOS"
-    };
-    const chPlatform = platformMap[profile.platform] || "Unknown";
 
     for (let i = headers.length - 1; i >= 0; i--) {
       const name = headers[i].name.toLowerCase();
       if (name === "user-agent") {
-        headers[i].value = profile.userAgent;
+        // Cloudflare-safe: keep real UA to match TLS fingerprint
+        if (!profile.cloudflareSafe) headers[i].value = profile.userAgent;
       } else if (name === "accept-language") {
         headers[i].value = formatAcceptLanguage(profile.languages);
       } else if (name === "sec-ch-ua" || name === "sec-ch-ua-full-version-list") {
-        // Firefox doesn't normally send these, but strip if present
-        headers.splice(i, 1);
+        // Cloudflare-safe: don't strip — must match real browser
+        if (!profile.cloudflareSafe) headers.splice(i, 1);
       } else if (name === "sec-ch-ua-platform") {
-        headers[i].value = `"${chPlatform}"`;
+        if (!profile.cloudflareSafe) {
+          const platformMap = { "Win32": "Windows", "Linux x86_64": "Linux", "MacIntel": "macOS" };
+          headers[i].value = `"${platformMap[profile.platform] || "Unknown"}"`;
+        }
       } else if (name === "sec-ch-ua-mobile") {
-        headers[i].value = "?0";
+        if (!profile.cloudflareSafe) headers[i].value = "?0";
       }
     }
     return { requestHeaders: headers };

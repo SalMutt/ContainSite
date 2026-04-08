@@ -13,6 +13,13 @@ const VECTORS = {
   connection:  "Connection"
 };
 
+// Vectors forced by Cloudflare-safe mode (true = forced on, false = forced off)
+const CF_SAFE_VECTORS = {
+  canvas: true, audio: true, fonts: true, clientRects: true,
+  timezone: true, navigator: true, webrtc: true, battery: true,
+  webgl: false, screen: false, plugins: false, connection: false
+};
+
 async function loadContainers() {
   const containers = await browser.runtime.sendMessage({ type: "getContainerList" });
   const list = document.getElementById("container-list");
@@ -53,11 +60,34 @@ async function loadContainers() {
     });
     row.appendChild(toggle);
 
+    const shield = document.createElement("button");
+    shield.className = "shield" + (c.cloudflareSafe ? " active" : "");
+    shield.textContent = "\u{1F6E1}";
+    shield.title = "Cloudflare-safe mode \u2014 reduces spoofing to avoid bot detection";
+    shield.addEventListener("click", async () => {
+      const newVal = !shield.classList.contains("active");
+      shield.classList.toggle("active", newVal);
+      await browser.runtime.sendMessage({
+        type: "toggleCloudflareSafe",
+        cookieStoreId: c.cookieStoreId,
+        enabled: newVal
+      });
+      c.cloudflareSafe = newVal;
+      // If vector panel is open, refresh it to show locked state
+      const panel = row.nextElementSibling;
+      if (panel && panel.classList.contains("vector-panel")) {
+        panel.remove();
+        gear.classList.remove("active");
+        toggleSettings(c.cookieStoreId, row, gear, newVal);
+      }
+    });
+    row.appendChild(shield);
+
     const gear = document.createElement("button");
     gear.className = "gear";
     gear.textContent = "\u2699";
     gear.title = "Vector settings";
-    gear.addEventListener("click", () => toggleSettings(c.cookieStoreId, row, gear));
+    gear.addEventListener("click", () => toggleSettings(c.cookieStoreId, row, gear, c.cloudflareSafe));
     row.appendChild(gear);
 
     const regen = document.createElement("button");
@@ -123,7 +153,7 @@ async function loadContainers() {
   }
 }
 
-async function toggleSettings(cookieStoreId, row, gearBtn) {
+async function toggleSettings(cookieStoreId, row, gearBtn, cloudflareSafe) {
   const existing = row.nextElementSibling;
   if (existing && existing.classList.contains("vector-panel")) {
     existing.remove();
@@ -135,6 +165,13 @@ async function toggleSettings(cookieStoreId, row, gearBtn) {
 
   const panel = document.createElement("div");
   panel.className = "vector-panel";
+
+  if (cloudflareSafe) {
+    const note = document.createElement("div");
+    note.className = "cf-note";
+    note.textContent = "\u{1F6E1} Cloudflare-safe mode active \u2014 some vectors are locked";
+    panel.appendChild(note);
+  }
 
   const { global, overrides } = await browser.runtime.sendMessage({
     type: "getContainerVectors",
@@ -148,17 +185,31 @@ async function toggleSettings(cookieStoreId, row, gearBtn) {
     const span = document.createElement("span");
     span.className = "vector-label";
     span.textContent = label;
-    item.appendChild(span);
+
+    const locked = cloudflareSafe && CF_SAFE_VECTORS[key] !== undefined;
 
     const hasOverride = overrides[key] !== undefined && overrides[key] !== null;
     const globalEnabled = global[key] !== false;
-    const effectiveValue = hasOverride ? overrides[key] : globalEnabled;
+    const effectiveValue = locked ? CF_SAFE_VECTORS[key] : (hasOverride ? overrides[key] : globalEnabled);
+
+    if (locked) {
+      span.classList.add("vector-locked");
+      span.title = CF_SAFE_VECTORS[key]
+        ? "Kept enabled by Cloudflare-safe mode"
+        : "Disabled by Cloudflare-safe mode (creates detectable mismatches)";
+    }
+    item.appendChild(span);
 
     const toggle = document.createElement("input");
     toggle.type = "checkbox";
     toggle.className = "toggle toggle-sm";
     toggle.checked = effectiveValue;
-    if (!hasOverride) toggle.classList.add("inherited");
+    if (locked) {
+      toggle.disabled = true;
+      toggle.classList.add("locked");
+    } else if (!hasOverride) {
+      toggle.classList.add("inherited");
+    }
 
     toggle.addEventListener("change", async () => {
       overrides[key] = toggle.checked;
@@ -175,7 +226,7 @@ async function toggleSettings(cookieStoreId, row, gearBtn) {
     resetBtn.className = "vector-reset";
     resetBtn.textContent = "\u21A9";
     resetBtn.title = "Reset to global default";
-    if (!hasOverride) resetBtn.style.visibility = "hidden";
+    if (!hasOverride || locked) resetBtn.style.visibility = "hidden";
     resetBtn.addEventListener("click", async () => {
       delete overrides[key];
       toggle.checked = globalEnabled;
